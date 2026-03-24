@@ -28,6 +28,13 @@ class UrbanEchoApp extends StatelessWidget {
   }
 }
 
+class SavedPlaceLog {
+  const SavedPlaceLog({required this.point, required this.recordedAt});
+
+  final LatLng point;
+  final DateTime recordedAt;
+}
+
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
 
@@ -37,13 +44,26 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _currentIndex = 0;
+  final List<SavedPlaceLog> _savedPlaces = [];
 
-  static const List<Widget> _pages = [HomeScreen(), MapScreen()];
+  void _savePlace(LatLng point) {
+    setState(() {
+      _savedPlaces.insert(
+        0,
+        SavedPlaceLog(point: point, recordedAt: DateTime.now()),
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final pages = [
+      HomeScreen(savedPlaceCount: _savedPlaces.length),
+      MapScreen(savedPlaces: _savedPlaces, onSavePlace: _savePlace),
+    ];
+
     return Scaffold(
-      body: _pages[_currentIndex],
+      body: pages[_currentIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         destinations: const [
@@ -69,7 +89,9 @@ class _AppShellState extends State<AppShell> {
 }
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, required this.savedPlaceCount});
+
+  final int savedPlaceCount;
 
   @override
   Widget build(BuildContext context) {
@@ -87,7 +109,7 @@ class HomeScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Version 0.2 adds Android location permission and current-position mapping.',
+            'Version 0.3 adds local place logging from the current map position.',
             style: theme.textTheme.titleMedium?.copyWith(color: Colors.white70),
           ),
           const SizedBox(height: 24),
@@ -109,15 +131,15 @@ class HomeScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'The app can request location access, read the current position, and place that point on the map.',
+                  'The app can request location, show your current position, and save place logs in the current session.',
                   style: theme.textTheme.bodyLarge,
                 ),
                 const SizedBox(height: 16),
-                const _FeatureChip(label: 'Android first'),
-                const SizedBox(height: 8),
-                const _FeatureChip(label: 'Map integrated'),
-                const SizedBox(height: 8),
                 const _FeatureChip(label: 'Current location enabled'),
+                const SizedBox(height: 8),
+                const _FeatureChip(label: 'Save current place'),
+                const SizedBox(height: 8),
+                _FeatureChip(label: 'Saved points: $savedPlaceCount'),
               ],
             ),
           ),
@@ -134,8 +156,8 @@ class HomeScreen extends StatelessWidget {
             description: 'Capture sound level and combine it with place data.',
           ),
           const _NextStep(
-            title: 'Place log',
-            description: 'Save observations with notes and activity tags.',
+            title: 'Notes and tags',
+            description: 'Add manual labels to saved locations.',
           ),
           const _NextStep(
             title: 'History view',
@@ -148,7 +170,14 @@ class HomeScreen extends StatelessWidget {
 }
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  const MapScreen({
+    super.key,
+    required this.savedPlaces,
+    required this.onSavePlace,
+  });
+
+  final List<SavedPlaceLog> savedPlaces;
+  final ValueChanged<LatLng> onSavePlace;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -248,6 +277,18 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  void _saveCurrentPlace() {
+    final location = _currentLocation;
+    if (location == null) {
+      return;
+    }
+
+    widget.onSavePlace(location);
+    setState(() {
+      _statusMessage = 'Current place saved.';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -257,11 +298,6 @@ class _MapScreenState extends State<MapScreen> {
       appBar: AppBar(
         title: const Text('Urban Map'),
         backgroundColor: Colors.transparent,
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _isLoading ? null : _loadCurrentLocation,
-        label: const Text('Locate me'),
-        icon: const Icon(Icons.my_location),
       ),
       body: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -290,6 +326,17 @@ class _MapScreenState extends State<MapScreen> {
                         child: const _MapMarker(
                           color: Color(0xFF8B97A4),
                           icon: Icons.school,
+                        ),
+                      ),
+                      ...widget.savedPlaces.map(
+                        (place) => Marker(
+                          point: place.point,
+                          width: 88,
+                          height: 88,
+                          child: const _MapMarker(
+                            color: Color(0xFFFFB84D),
+                            icon: Icons.bookmark,
+                          ),
                         ),
                       ),
                       if (location != null)
@@ -337,6 +384,27 @@ class _MapScreenState extends State<MapScreen> {
                             color: Colors.white70,
                           ),
                         ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            FilledButton.icon(
+                              onPressed: _isLoading
+                                  ? null
+                                  : _loadCurrentLocation,
+                              icon: const Icon(Icons.my_location),
+                              label: const Text('Locate me'),
+                            ),
+                            FilledButton.tonalIcon(
+                              onPressed: location == null
+                                  ? null
+                                  : _saveCurrentPlace,
+                              icon: const Icon(Icons.bookmark_add),
+                              label: const Text('Save place'),
+                            ),
+                          ],
+                        ),
                         if (location != null) ...[
                           const SizedBox(height: 10),
                           Text(
@@ -346,6 +414,55 @@ class _MapScreenState extends State<MapScreen> {
                             ),
                           ),
                         ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0xCC111417),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Saved places (${widget.savedPlaces.length})',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (widget.savedPlaces.isEmpty)
+                          Text(
+                            'No places saved yet.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: Colors.white70,
+                            ),
+                          )
+                        else
+                          ...widget.savedPlaces
+                              .take(3)
+                              .map(
+                                (place) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 6),
+                                  child: Text(
+                                    '${place.point.latitude.toStringAsFixed(4)}, ${place.point.longitude.toStringAsFixed(4)}  •  ${_formatTime(place.recordedAt)}',
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                ),
+                              ),
                       ],
                     ),
                   ),
@@ -428,4 +545,11 @@ class _MapMarker extends StatelessWidget {
       ],
     );
   }
+}
+
+String _formatTime(DateTime value) {
+  final hour = value.hour.toString().padLeft(2, '0');
+  final minute = value.minute.toString().padLeft(2, '0');
+  final second = value.second.toString().padLeft(2, '0');
+  return '$hour:$minute:$second';
 }
