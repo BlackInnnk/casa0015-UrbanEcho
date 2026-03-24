@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 void main() {
@@ -86,7 +87,7 @@ class HomeScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Initial Android build for mapping urban study and rest spaces.',
+            'Version 0.2 adds Android location permission and current-position mapping.',
             style: theme.textTheme.titleMedium?.copyWith(color: Colors.white70),
           ),
           const SizedBox(height: 24),
@@ -101,14 +102,14 @@ class HomeScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Version 0.1',
+                  'Current milestone',
                   style: theme.textTheme.labelLarge?.copyWith(
                     color: const Color(0xFF7EE4C5),
                   ),
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'This first build proves the app launches successfully and displays a map view for future place logging.',
+                  'The app can request location access, read the current position, and place that point on the map.',
                   style: theme.textTheme.bodyLarge,
                 ),
                 const SizedBox(height: 16),
@@ -116,7 +117,7 @@ class HomeScreen extends StatelessWidget {
                 const SizedBox(height: 8),
                 const _FeatureChip(label: 'Map integrated'),
                 const SizedBox(height: 8),
-                const _FeatureChip(label: 'Ready for live sensing next'),
+                const _FeatureChip(label: 'Current location enabled'),
               ],
             ),
           ),
@@ -129,16 +130,16 @@ class HomeScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           const _NextStep(
-            title: 'Live scan',
-            description: 'Measure noise level and capture timestamped records.',
+            title: 'Noise sensing',
+            description: 'Capture sound level and combine it with place data.',
           ),
           const _NextStep(
             title: 'Place log',
             description: 'Save observations with notes and activity tags.',
           ),
           const _NextStep(
-            title: 'Shared memory',
-            description: 'Sync public or private place entries to the cloud.',
+            title: 'History view',
+            description: 'Review previous place records on a timeline.',
           ),
         ],
       ),
@@ -146,19 +147,121 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-class MapScreen extends StatelessWidget {
+class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
 
+  @override
+  State<MapScreen> createState() => _MapScreenState();
+}
+
+class _MapScreenState extends State<MapScreen> {
   static const LatLng _ucl = LatLng(51.5246, -0.1340);
+
+  final MapController _mapController = MapController();
+
+  LatLng? _currentLocation;
+  bool _isLoading = true;
+  String _statusMessage = 'Requesting location...';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentLocation();
+  }
+
+  Future<void> _loadCurrentLocation() async {
+    setState(() {
+      _isLoading = true;
+      _statusMessage = 'Checking location permission...';
+    });
+
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _statusMessage = 'Location services are turned off.';
+      });
+      return;
+    }
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _statusMessage = 'Location permission was denied.';
+      });
+      return;
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _statusMessage = 'Permission denied forever. Enable it in Settings.';
+      });
+      return;
+    }
+
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+
+      final point = LatLng(position.latitude, position.longitude);
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _currentLocation = point;
+        _isLoading = false;
+        _statusMessage = 'Current location loaded.';
+      });
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _mapController.move(point, 16.8);
+        }
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _statusMessage = 'Unable to read current location.';
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final location = _currentLocation;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Urban Map'),
         backgroundColor: Colors.transparent,
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _isLoading ? null : _loadCurrentLocation,
+        label: const Text('Locate me'),
+        icon: const Icon(Icons.my_location),
       ),
       body: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -167,6 +270,7 @@ class MapScreen extends StatelessWidget {
           child: Stack(
             children: [
               FlutterMap(
+                mapController: _mapController,
                 options: const MapOptions(
                   initialCenter: _ucl,
                   initialZoom: 15.2,
@@ -181,10 +285,23 @@ class MapScreen extends StatelessWidget {
                     markers: [
                       Marker(
                         point: _ucl,
-                        width: 96,
-                        height: 96,
-                        child: const _MapMarker(),
+                        width: 90,
+                        height: 90,
+                        child: const _MapMarker(
+                          color: Color(0xFF8B97A4),
+                          icon: Icons.school,
+                        ),
                       ),
+                      if (location != null)
+                        Marker(
+                          point: location,
+                          width: 96,
+                          height: 96,
+                          child: const _MapMarker(
+                            color: Color(0xFF7EE4C5),
+                            icon: Icons.my_location,
+                          ),
+                        ),
                     ],
                   ),
                 ],
@@ -206,23 +323,35 @@ class MapScreen extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          'Prototype map loaded',
+                          location == null
+                              ? 'Waiting for your location'
+                              : 'Current location ready',
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w700,
                           ),
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'The first pinned location is centred on UCL. Future versions will replace this with live user records.',
+                          _statusMessage,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: Colors.white70,
                           ),
                         ),
+                        if (location != null) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            'Lat ${location.latitude.toStringAsFixed(5)} | Lng ${location.longitude.toStringAsFixed(5)}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: const Color(0xFF7EE4C5),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
                 ),
               ),
+              if (_isLoading) const Center(child: CircularProgressIndicator()),
             ],
           ),
         ),
@@ -280,7 +409,10 @@ class _NextStep extends StatelessWidget {
 }
 
 class _MapMarker extends StatelessWidget {
-  const _MapMarker();
+  const _MapMarker({required this.color, required this.icon});
+
+  final Color color;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
@@ -289,17 +421,10 @@ class _MapMarker extends StatelessWidget {
       children: [
         Container(
           padding: const EdgeInsets.all(10),
-          decoration: const BoxDecoration(
-            color: Color(0xFF7EE4C5),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(
-            Icons.location_on,
-            color: Color(0xFF0E1816),
-            size: 28,
-          ),
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          child: Icon(icon, color: const Color(0xFF0E1816), size: 26),
         ),
-        Container(width: 2, height: 20, color: const Color(0xFF7EE4C5)),
+        Container(width: 2, height: 18, color: color),
       ],
     );
   }
