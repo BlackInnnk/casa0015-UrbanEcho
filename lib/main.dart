@@ -304,13 +304,22 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
 
-  void _showSavedPlaces() {
-    showModalBottomSheet<void>(
+  Future<void> _showSavedPlaces() async {
+    final selectedPlace = await showModalBottomSheet<SavedPlaceLog>(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF111417),
       builder: (context) => _SavedPlacesSheet(places: widget.savedPlaces),
     );
+
+    if (selectedPlace == null || !mounted) {
+      return;
+    }
+
+    _mapController.move(selectedPlace.point, 17);
+    setState(() {
+      _statusMessage = 'Viewing ${selectedPlace.name}.';
+    });
   }
 
   @override
@@ -525,7 +534,12 @@ class _SavedPlacesSheet extends StatelessWidget {
                           separatorBuilder: (context, index) =>
                               const SizedBox(height: 10),
                           itemBuilder: (context, index) {
-                            return _SavedPlaceSummary(place: places[index]);
+                            final place = places[index];
+                            return InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () => Navigator.of(context).pop(place),
+                              child: _SavedPlaceSummary(place: place),
+                            );
                           },
                         ),
                 ),
