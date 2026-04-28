@@ -53,6 +53,8 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _currentIndex = 0;
+  int _focusRequestId = 0;
+  SavedPlaceLog? _placeToFocus;
   final List<SavedPlaceLog> _savedPlaces = [];
 
   void _savePlace(SavedPlaceLog place) {
@@ -61,15 +63,43 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
+  void _viewPlaceOnMap(SavedPlaceLog place) {
+    setState(() {
+      _focusRequestId += 1;
+      _placeToFocus = place;
+      _currentIndex = 1;
+    });
+  }
+
+  void _deletePlace(SavedPlaceLog place) {
+    setState(() {
+      _savedPlaces.remove(place);
+      if (_placeToFocus == place) {
+        _placeToFocus = null;
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
       HomeScreen(savedPlaceCount: _savedPlaces.length),
-      MapScreen(savedPlaces: _savedPlaces, onSavePlace: _savePlace),
+      MapScreen(
+        savedPlaces: _savedPlaces,
+        onSavePlace: _savePlace,
+        onDeletePlace: _deletePlace,
+        focusPlace: _placeToFocus,
+        focusRequestId: _focusRequestId,
+      ),
+      HistoryScreen(
+        places: _savedPlaces,
+        onViewPlace: _viewPlaceOnMap,
+        onDeletePlace: _deletePlace,
+      ),
     ];
 
     return Scaffold(
-      body: pages[_currentIndex],
+      body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         destinations: const [
@@ -82,6 +112,11 @@ class _AppShellState extends State<AppShell> {
             icon: Icon(Icons.map_outlined),
             selectedIcon: Icon(Icons.map),
             label: 'Map',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.history_outlined),
+            selectedIcon: Icon(Icons.history),
+            label: 'History',
           ),
         ],
         onDestinationSelected: (index) {
@@ -115,7 +150,7 @@ class HomeScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Version 0.3 adds local place logging from the current map position.',
+            'Record places, comments, and revisit saved locations on the map.',
             style: theme.textTheme.titleMedium?.copyWith(color: Colors.white70),
           ),
           const SizedBox(height: 24),
@@ -167,10 +202,115 @@ class HomeScreen extends StatelessWidget {
           ),
           const _NextStep(
             title: 'History view',
-            description: 'Review previous place records on a timeline.',
+            description: 'Review saved records and jump back to the map.',
           ),
         ],
       ),
+    );
+  }
+}
+
+class HistoryScreen extends StatelessWidget {
+  const HistoryScreen({
+    super.key,
+    required this.places,
+    required this.onViewPlace,
+    required this.onDeletePlace,
+  });
+
+  final List<SavedPlaceLog> places;
+  final ValueChanged<SavedPlaceLog> onViewPlace;
+  final ValueChanged<SavedPlaceLog> onDeletePlace;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+        children: [
+          Text(
+            'History',
+            style: theme.textTheme.displaySmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Review all places saved in this session.',
+            style: theme.textTheme.titleMedium?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 24),
+          if (places.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A2127),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Text(
+                'No saved places yet. Use the map to save your current location.',
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: Colors.white70,
+                ),
+              ),
+            )
+          else
+            ...places.map(
+              (place) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _HistoryPlaceCard(
+                  place: place,
+                  onViewPlace: onViewPlace,
+                  onDeletePlace: onDeletePlace,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HistoryPlaceCard extends StatelessWidget {
+  const _HistoryPlaceCard({
+    required this.place,
+    required this.onViewPlace,
+    required this.onDeletePlace,
+  });
+
+  final SavedPlaceLog place;
+  final ValueChanged<SavedPlaceLog> onViewPlace;
+  final ValueChanged<SavedPlaceLog> onDeletePlace;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SavedPlaceSummary(place: place),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Wrap(
+            spacing: 8,
+            children: [
+              TextButton.icon(
+                onPressed: () => onDeletePlace(place),
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Delete'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: () => onViewPlace(place),
+                icon: const Icon(Icons.map_outlined),
+                label: const Text('View on map'),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -180,10 +320,16 @@ class MapScreen extends StatefulWidget {
     super.key,
     required this.savedPlaces,
     required this.onSavePlace,
+    required this.onDeletePlace,
+    required this.focusPlace,
+    required this.focusRequestId,
   });
 
   final List<SavedPlaceLog> savedPlaces;
   final ValueChanged<SavedPlaceLog> onSavePlace;
+  final ValueChanged<SavedPlaceLog> onDeletePlace;
+  final SavedPlaceLog? focusPlace;
+  final int focusRequestId;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -202,6 +348,31 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     _loadCurrentLocation();
+  }
+
+  @override
+  void didUpdateWidget(covariant MapScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    final focusPlace = widget.focusPlace;
+    if (focusPlace == null ||
+        widget.focusRequestId == oldWidget.focusRequestId) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _focusPlace(focusPlace);
+    });
+  }
+
+  void _focusPlace(SavedPlaceLog place) {
+    _mapController.move(place.point, 17);
+    setState(() {
+      _statusMessage = 'Viewing ${place.name}.';
+    });
   }
 
   Future<void> _loadCurrentLocation() async {
@@ -309,17 +480,17 @@ class _MapScreenState extends State<MapScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF111417),
-      builder: (context) => _SavedPlacesSheet(places: widget.savedPlaces),
+      builder: (context) => _SavedPlacesSheet(
+        places: widget.savedPlaces,
+        onDeletePlace: widget.onDeletePlace,
+      ),
     );
 
     if (selectedPlace == null || !mounted) {
       return;
     }
 
-    _mapController.move(selectedPlace.point, 17);
-    setState(() {
-      _statusMessage = 'Viewing ${selectedPlace.name}.';
-    });
+    _focusPlace(selectedPlace);
   }
 
   @override
@@ -471,80 +642,95 @@ class _MapScreenState extends State<MapScreen> {
 }
 
 class _SavedPlacesSheet extends StatelessWidget {
-  const _SavedPlacesSheet({required this.places});
+  const _SavedPlacesSheet({required this.places, required this.onDeletePlace});
 
   final List<SavedPlaceLog> places;
+  final ValueChanged<SavedPlaceLog> onDeletePlace;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return SafeArea(
-      child: DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.58,
-        minChildSize: 0.32,
-        maxChildSize: 0.9,
-        builder: (context, scrollController) {
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-            child: Column(
-              children: [
-                Container(
-                  width: 44,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white24,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Row(
+      child: StatefulBuilder(
+        builder: (context, setSheetState) {
+          return DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.58,
+            minChildSize: 0.32,
+            maxChildSize: 0.9,
+            builder: (context, scrollController) {
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                child: Column(
                   children: [
-                    Expanded(
-                      child: Text(
-                        'Saved places',
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                    Container(
+                      width: 44,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(999),
                       ),
                     ),
-                    Text(
-                      '${places.length}',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: const Color(0xFF7EE4C5),
-                      ),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Saved places',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '${places.length}',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: const Color(0xFF7EE4C5),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Expanded(
+                      child: places.isEmpty
+                          ? Center(
+                              child: Text(
+                                'No places saved yet.',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            )
+                          : ListView.separated(
+                              controller: scrollController,
+                              itemCount: places.length,
+                              separatorBuilder: (context, index) =>
+                                  const SizedBox(height: 10),
+                              itemBuilder: (context, index) {
+                                final place = places[index];
+                                return InkWell(
+                                  borderRadius: BorderRadius.circular(14),
+                                  onTap: () => Navigator.of(context).pop(place),
+                                  child: _SavedPlaceSummary(
+                                    place: place,
+                                    trailing: IconButton(
+                                      tooltip: 'Delete',
+                                      onPressed: () {
+                                        onDeletePlace(place);
+                                        setSheetState(() {});
+                                      },
+                                      icon: const Icon(Icons.delete_outline),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 14),
-                Expanded(
-                  child: places.isEmpty
-                      ? Center(
-                          child: Text(
-                            'No places saved yet.',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: Colors.white70,
-                            ),
-                          ),
-                        )
-                      : ListView.separated(
-                          controller: scrollController,
-                          itemCount: places.length,
-                          separatorBuilder: (context, index) =>
-                              const SizedBox(height: 10),
-                          itemBuilder: (context, index) {
-                            final place = places[index];
-                            return InkWell(
-                              borderRadius: BorderRadius.circular(14),
-                              onTap: () => Navigator.of(context).pop(place),
-                              child: _SavedPlaceSummary(place: place),
-                            );
-                          },
-                        ),
-                ),
-              ],
-            ),
+              );
+            },
           );
         },
       ),
@@ -666,9 +852,10 @@ class _SavePlaceDialogState extends State<_SavePlaceDialog> {
 }
 
 class _SavedPlaceSummary extends StatelessWidget {
-  const _SavedPlaceSummary({required this.place});
+  const _SavedPlaceSummary({required this.place, this.trailing});
 
   final SavedPlaceLog place;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -708,6 +895,7 @@ class _SavedPlaceSummary extends StatelessWidget {
                     color: _placeTypeColor(place.placeType),
                   ),
                 ),
+                if (trailing != null) ...[const SizedBox(width: 4), trailing!],
               ],
             ),
             const SizedBox(height: 4),
