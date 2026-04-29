@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -6,6 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:light/light.dart';
 import 'package:noise_meter/noise_meter.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 const List<String> _placeTypes = ['Study', 'Rest', 'Social'];
@@ -65,6 +68,36 @@ class SavedPlaceLog {
       lightLux: this.lightLux,
     );
   }
+
+  Map<String, Object?> toJson() {
+    return {
+      'latitude': point.latitude,
+      'longitude': point.longitude,
+      'recordedAt': recordedAt.toIso8601String(),
+      'name': name,
+      'placeType': placeType,
+      'comment': comment,
+      'noiseDb': noiseDb,
+      'lightLux': lightLux,
+    };
+  }
+
+  factory SavedPlaceLog.fromJson(Map<String, Object?> json) {
+    return SavedPlaceLog(
+      point: LatLng(
+        (json['latitude'] as num).toDouble(),
+        (json['longitude'] as num).toDouble(),
+      ),
+      recordedAt:
+          DateTime.tryParse(json['recordedAt'] as String? ?? '') ??
+          DateTime.now(),
+      name: json['name'] as String? ?? 'Saved place',
+      placeType: json['placeType'] as String? ?? _placeTypes.first,
+      comment: json['comment'] as String? ?? '',
+      noiseDb: (json['noiseDb'] as num?)?.toDouble(),
+      lightLux: (json['lightLux'] as num?)?.toInt(),
+    );
+  }
 }
 
 class AppShell extends StatefulWidget {
@@ -75,15 +108,24 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
+  static const String _savedPlacesFileName = 'urbanecho_saved_places.json';
+
   int _currentIndex = 0;
   int _focusRequestId = 0;
   SavedPlaceLog? _placeToFocus;
   final List<SavedPlaceLog> _savedPlaces = [];
 
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedPlaces();
+  }
+
   void _savePlace(SavedPlaceLog place) {
     setState(() {
       _savedPlaces.insert(0, place);
     });
+    _persistSavedPlaces();
   }
 
   void _viewPlaceOnMap(SavedPlaceLog place) {
@@ -101,6 +143,7 @@ class _AppShellState extends State<AppShell> {
         _placeToFocus = null;
       }
     });
+    _persistSavedPlaces();
   }
 
   void _updatePlace(SavedPlaceLog oldPlace, SavedPlaceLog updatedPlace) {
@@ -115,6 +158,58 @@ class _AppShellState extends State<AppShell> {
         _placeToFocus = updatedPlace;
       }
     });
+    _persistSavedPlaces();
+  }
+
+  Future<File> _savedPlacesFile() async {
+    final directory = await getApplicationDocumentsDirectory();
+    return File('${directory.path}/$_savedPlacesFileName');
+  }
+
+  Future<void> _loadSavedPlaces() async {
+    try {
+      final file = await _savedPlacesFile();
+      if (!await file.exists()) {
+        return;
+      }
+
+      final raw = await file.readAsString();
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        return;
+      }
+
+      final places = decoded
+          .whereType<Map>()
+          .map(
+            (item) => SavedPlaceLog.fromJson(Map<String, Object?>.from(item)),
+          )
+          .toList();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _savedPlaces
+          ..clear()
+          ..addAll(places);
+      });
+    } catch (_) {
+      // Ignore corrupted local data so the prototype can still launch.
+    }
+  }
+
+  Future<void> _persistSavedPlaces() async {
+    try {
+      final file = await _savedPlacesFile();
+      final raw = jsonEncode(
+        _savedPlaces.map((place) => place.toJson()).toList(),
+      );
+      await file.writeAsString(raw);
+    } catch (_) {
+      // Local persistence should not block the main app flow.
+    }
   }
 
   @override
@@ -271,6 +366,34 @@ class HistoryScreen extends StatefulWidget {
 class _HistoryScreenState extends State<HistoryScreen> {
   String _selectedPlaceType = 'All';
 
+  void _showJsonExport() {
+    final formattedJson = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(widget.places.map((place) => place.toJson()).toList());
+
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Export JSON'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              formattedJson,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -293,6 +416,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
           Text(
             'Review all places saved in this session.',
             style: theme.textTheme.titleMedium?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 16),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: widget.places.isEmpty ? null : _showJsonExport,
+              icon: const Icon(Icons.data_object),
+              label: const Text('Export JSON'),
+            ),
           ),
           const SizedBox(height: 24),
           _PlaceTypeFilter(
@@ -616,6 +748,17 @@ class _MapScreenState extends State<MapScreen> {
     _focusPlace(selectedPlace);
   }
 
+  Future<void> _showPlaceDetails(SavedPlaceLog place) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => _SavedPlaceDetailsDialog(
+        place: place,
+        onUpdatePlace: widget.onUpdatePlace,
+        onDeletePlace: widget.onDeletePlace,
+      ),
+    );
+  }
+
   Future<void> _toggleSensors() async {
     if (_isSensorScanning) {
       await _stopSensors();
@@ -756,9 +899,12 @@ class _MapScreenState extends State<MapScreen> {
                           point: place.point,
                           width: 88,
                           height: 88,
-                          child: _MapMarker(
-                            color: _placeTypeColor(place.placeType),
-                            icon: Icons.bookmark,
+                          child: GestureDetector(
+                            onTap: () => _showPlaceDetails(place),
+                            child: _MapMarker(
+                              color: _placeTypeColor(place.placeType),
+                              icon: Icons.bookmark,
+                            ),
                           ),
                         ),
                       ),
@@ -1201,6 +1347,65 @@ class _SavePlaceDialogState extends State<_SavePlaceDialog> {
         FilledButton(
           onPressed: _submit,
           child: Text(widget.existingPlace == null ? 'Save' : 'Update'),
+        ),
+      ],
+    );
+  }
+}
+
+class _SavedPlaceDetailsDialog extends StatelessWidget {
+  const _SavedPlaceDetailsDialog({
+    required this.place,
+    required this.onUpdatePlace,
+    required this.onDeletePlace,
+  });
+
+  final SavedPlaceLog place;
+  final void Function(SavedPlaceLog oldPlace, SavedPlaceLog updatedPlace)
+  onUpdatePlace;
+  final ValueChanged<SavedPlaceLog> onDeletePlace;
+
+  Future<void> _editPlace(BuildContext context) async {
+    final updatedPlace = await showDialog<SavedPlaceLog>(
+      context: context,
+      builder: (context) =>
+          _SavePlaceDialog(point: place.point, existingPlace: place),
+    );
+
+    if (updatedPlace == null) {
+      return;
+    }
+
+    onUpdatePlace(place, updatedPlace);
+    if (context.mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  void _deletePlace(BuildContext context) {
+    onDeletePlace(place);
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Place details'),
+      content: SingleChildScrollView(child: _SavedPlaceSummary(place: place)),
+      actions: [
+        TextButton.icon(
+          onPressed: () => _deletePlace(context),
+          icon: const Icon(Icons.delete_outline),
+          label: const Text('Delete'),
+        ),
+        TextButton.icon(
+          onPressed: () => _editPlace(context),
+          icon: const Icon(Icons.edit_outlined),
+          label: const Text('Edit'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
         ),
       ],
     );
