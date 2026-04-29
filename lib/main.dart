@@ -897,6 +897,7 @@ class _MapScreenState extends State<MapScreen> {
   int? _currentLightLux;
   bool _isLoading = true;
   bool _isSensorScanning = false;
+  String _selectedMapPlaceType = 'All';
   String _statusMessage = 'Requesting location...';
   String _sensorMessage = 'Sensors are off.';
 
@@ -1122,6 +1123,7 @@ class _MapScreenState extends State<MapScreen> {
       backgroundColor: const Color(0xFF111417),
       builder: (context) => _SavedPlacesSheet(
         places: widget.savedPlaces,
+        currentLocation: _currentLocation,
         onUpdatePlace: widget.onUpdatePlace,
         onDeletePlace: widget.onDeletePlace,
       ),
@@ -1139,6 +1141,7 @@ class _MapScreenState extends State<MapScreen> {
       context: context,
       builder: (context) => _SavedPlaceDetailsDialog(
         place: place,
+        currentLocation: _currentLocation,
         onUpdatePlace: widget.onUpdatePlace,
         onDeletePlace: widget.onDeletePlace,
       ),
@@ -1245,6 +1248,10 @@ class _MapScreenState extends State<MapScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final location = _currentLocation;
+    final visibleSavedPlaces = _filterPlacesByType(
+      widget.savedPlaces,
+      _selectedMapPlaceType,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -1280,7 +1287,7 @@ class _MapScreenState extends State<MapScreen> {
                           icon: Icons.school,
                         ),
                       ),
-                      ...widget.savedPlaces.map(
+                      ...visibleSavedPlaces.map(
                         (place) => Marker(
                           point: place.point,
                           width: 88,
@@ -1427,6 +1434,21 @@ class _MapScreenState extends State<MapScreen> {
                   label: Text('Saved (${widget.savedPlaces.length})'),
                 ),
               ),
+              Positioned(
+                left: 16,
+                right: 132,
+                bottom: 16,
+                child: _MapPlaceFilter(
+                  selectedPlaceType: _selectedMapPlaceType,
+                  visibleCount: visibleSavedPlaces.length,
+                  totalCount: widget.savedPlaces.length,
+                  onSelected: (placeType) {
+                    setState(() {
+                      _selectedMapPlaceType = placeType;
+                    });
+                  },
+                ),
+              ),
               if (_isLoading) const Center(child: CircularProgressIndicator()),
             ],
           ),
@@ -1436,14 +1458,65 @@ class _MapScreenState extends State<MapScreen> {
   }
 }
 
+class _MapPlaceFilter extends StatelessWidget {
+  const _MapPlaceFilter({
+    required this.selectedPlaceType,
+    required this.visibleCount,
+    required this.totalCount,
+    required this.onSelected,
+  });
+
+  final String selectedPlaceType;
+  final int visibleCount;
+  final int totalCount;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xCC111417),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              selectedPlaceType == 'All'
+                  ? 'Showing $totalCount saved'
+                  : 'Showing $visibleCount/$totalCount $selectedPlaceType',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: Colors.white70,
+              ),
+            ),
+            const SizedBox(height: 6),
+            _PlaceTypeFilter(
+              selectedPlaceType: selectedPlaceType,
+              onSelected: onSelected,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SavedPlacesSheet extends StatelessWidget {
   const _SavedPlacesSheet({
     required this.places,
+    required this.currentLocation,
     required this.onUpdatePlace,
     required this.onDeletePlace,
   });
 
   final List<SavedPlaceLog> places;
+  final LatLng? currentLocation;
   final void Function(SavedPlaceLog oldPlace, SavedPlaceLog updatedPlace)
   onUpdatePlace;
   final ValueChanged<SavedPlaceLog> onDeletePlace;
@@ -1452,6 +1525,7 @@ class _SavedPlacesSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     String selectedPlaceType = 'All';
+    String selectedSort = currentLocation == null ? 'Newest' : 'Nearest';
 
     return SafeArea(
       child: StatefulBuilder(
@@ -1462,9 +1536,10 @@ class _SavedPlacesSheet extends StatelessWidget {
             minChildSize: 0.32,
             maxChildSize: 0.9,
             builder: (context, scrollController) {
-              final filteredPlaces = _filterPlacesByType(
-                places,
-                selectedPlaceType,
+              final filteredPlaces = _sortSavedPlacesForMapSheet(
+                _filterPlacesByType(places, selectedPlaceType),
+                selectedSort,
+                currentLocation,
               );
 
               return Padding(
@@ -1509,6 +1584,41 @@ class _SavedPlacesSheet extends StatelessWidget {
                         });
                       },
                     ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedSort,
+                      decoration: InputDecoration(
+                        labelText: 'Sort saved places',
+                        filled: true,
+                        fillColor: const Color(0xFF1A2127),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      items:
+                          [
+                                if (currentLocation != null) 'Nearest',
+                                'Newest',
+                                'Oldest',
+                              ]
+                              .map(
+                                (sortMode) => DropdownMenuItem(
+                                  value: sortMode,
+                                  child: Text(sortMode),
+                                ),
+                              )
+                              .toList(),
+                      onChanged: (sortMode) {
+                        if (sortMode == null) {
+                          return;
+                        }
+
+                        setSheetState(() {
+                          selectedSort = sortMode;
+                        });
+                      },
+                    ),
                     const SizedBox(height: 14),
                     Expanded(
                       child: places.isEmpty
@@ -1541,6 +1651,7 @@ class _SavedPlacesSheet extends StatelessWidget {
                                   onTap: () => Navigator.of(context).pop(place),
                                   child: _SavedPlaceSummary(
                                     place: place,
+                                    currentLocation: currentLocation,
                                     trailing: Wrap(
                                       spacing: 2,
                                       children: [
@@ -1749,11 +1860,13 @@ class _SavePlaceDialogState extends State<_SavePlaceDialog> {
 class _SavedPlaceDetailsDialog extends StatelessWidget {
   const _SavedPlaceDetailsDialog({
     required this.place,
+    required this.currentLocation,
     required this.onUpdatePlace,
     required this.onDeletePlace,
   });
 
   final SavedPlaceLog place;
+  final LatLng? currentLocation;
   final void Function(SavedPlaceLog oldPlace, SavedPlaceLog updatedPlace)
   onUpdatePlace;
   final ValueChanged<SavedPlaceLog> onDeletePlace;
@@ -1784,7 +1897,12 @@ class _SavedPlaceDetailsDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Place details'),
-      content: SingleChildScrollView(child: _SavedPlaceSummary(place: place)),
+      content: SingleChildScrollView(
+        child: _SavedPlaceSummary(
+          place: place,
+          currentLocation: currentLocation,
+        ),
+      ),
       actions: [
         TextButton.icon(
           onPressed: () => _deletePlace(context),
@@ -1806,15 +1924,25 @@ class _SavedPlaceDetailsDialog extends StatelessWidget {
 }
 
 class _SavedPlaceSummary extends StatelessWidget {
-  const _SavedPlaceSummary({required this.place, this.trailing});
+  const _SavedPlaceSummary({
+    required this.place,
+    this.currentLocation,
+    this.trailing,
+  });
 
   final SavedPlaceLog place;
+  final LatLng? currentLocation;
   final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final comment = place.comment.isEmpty ? 'No comment added.' : place.comment;
+    final distanceLabel = currentLocation == null
+        ? null
+        : _formatDistanceMeters(
+            const Distance()(currentLocation!, place.point),
+          );
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1861,7 +1989,11 @@ class _SavedPlaceSummary extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              '${place.point.latitude.toStringAsFixed(4)}, ${place.point.longitude.toStringAsFixed(4)}  •  ${_formatTime(place.recordedAt)}',
+              [
+                '${place.point.latitude.toStringAsFixed(4)}, ${place.point.longitude.toStringAsFixed(4)}',
+                _formatTime(place.recordedAt),
+                if (distanceLabel != null) distanceLabel,
+              ].join('  •  '),
               style: theme.textTheme.bodySmall?.copyWith(color: Colors.white54),
             ),
             const SizedBox(height: 8),
@@ -2168,6 +2300,34 @@ List<SavedPlaceLog> _sortPlaces(List<SavedPlaceLog> places, String sortMode) {
   return sortedPlaces;
 }
 
+List<SavedPlaceLog> _sortSavedPlacesForMapSheet(
+  List<SavedPlaceLog> places,
+  String sortMode,
+  LatLng? currentLocation,
+) {
+  final sortedPlaces = List<SavedPlaceLog>.of(places);
+
+  switch (sortMode) {
+    case 'Nearest':
+      final location = currentLocation;
+      if (location == null) {
+        return sortedPlaces;
+      }
+      const distance = Distance();
+      sortedPlaces.sort(
+        (a, b) =>
+            distance(location, a.point).compareTo(distance(location, b.point)),
+      );
+    case 'Oldest':
+      sortedPlaces.sort((a, b) => a.recordedAt.compareTo(b.recordedAt));
+    case 'Newest':
+    default:
+      sortedPlaces.sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
+  }
+
+  return sortedPlaces;
+}
+
 int _placeTypeCount(List<SavedPlaceLog> places, String placeType) {
   return places.where((place) => place.placeType == placeType).length;
 }
@@ -2230,6 +2390,14 @@ String _formatNoiseValue(double? value) {
 
 String _formatLightValue(int? value) {
   return value == null ? 'Unknown' : '$value lux';
+}
+
+String _formatDistanceMeters(double value) {
+  if (value < 1000) {
+    return '${value.round()} m away';
+  }
+
+  return '${(value / 1000).toStringAsFixed(1)} km away';
 }
 
 String _noiseLevelFromDb(double? value) {
