@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:light/light.dart';
+import 'package:noise_meter/noise_meter.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 const List<String> _placeTypes = ['Study', 'Rest', 'Social'];
 
@@ -37,6 +42,8 @@ class SavedPlaceLog {
     required this.name,
     required this.placeType,
     required this.comment,
+    required this.noiseDb,
+    required this.lightLux,
   });
 
   final LatLng point;
@@ -44,6 +51,8 @@ class SavedPlaceLog {
   final String name;
   final String placeType;
   final String comment;
+  final double? noiseDb;
+  final int? lightLux;
 
   SavedPlaceLog copyWith({String? name, String? placeType, String? comment}) {
     return SavedPlaceLog(
@@ -52,6 +61,8 @@ class SavedPlaceLog {
       name: name ?? this.name,
       placeType: placeType ?? this.placeType,
       comment: comment ?? this.comment,
+      noiseDb: this.noiseDb,
+      lightLux: this.lightLux,
     );
   }
 }
@@ -431,15 +442,30 @@ class _MapScreenState extends State<MapScreen> {
   static const LatLng _ucl = LatLng(51.5246, -0.1340);
 
   final MapController _mapController = MapController();
+  final Light _light = Light();
+  final NoiseMeter _noiseMeter = NoiseMeter();
 
   LatLng? _currentLocation;
+  StreamSubscription<int>? _lightSubscription;
+  StreamSubscription<NoiseReading>? _noiseSubscription;
+  double? _currentNoiseDb;
+  int? _currentLightLux;
   bool _isLoading = true;
+  bool _isSensorScanning = false;
   String _statusMessage = 'Requesting location...';
+  String _sensorMessage = 'Sensors are off.';
 
   @override
   void initState() {
     super.initState();
     _loadCurrentLocation();
+  }
+
+  @override
+  void dispose() {
+    _lightSubscription?.cancel();
+    _noiseSubscription?.cancel();
+    super.dispose();
   }
 
   @override
@@ -554,7 +580,11 @@ class _MapScreenState extends State<MapScreen> {
 
     final place = await showDialog<SavedPlaceLog>(
       context: context,
-      builder: (context) => _SavePlaceDialog(point: location),
+      builder: (context) => _SavePlaceDialog(
+        point: location,
+        noiseDb: _currentNoiseDb,
+        lightLux: _currentLightLux,
+      ),
     );
 
     if (place == null) {
@@ -584,6 +614,102 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     _focusPlace(selectedPlace);
+  }
+
+  Future<void> _toggleSensors() async {
+    if (_isSensorScanning) {
+      await _stopSensors();
+      return;
+    }
+
+    await _startSensors();
+  }
+
+  Future<void> _startSensors() async {
+    setState(() {
+      _sensorMessage = 'Starting sensors...';
+    });
+
+    final microphoneStatus = await Permission.microphone.request();
+    if (!microphoneStatus.isGranted) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isSensorScanning = false;
+        _sensorMessage = 'Microphone permission denied.';
+      });
+      return;
+    }
+
+    await _light.requestAuthorization();
+    await _noiseSubscription?.cancel();
+    await _lightSubscription?.cancel();
+
+    _noiseSubscription = _noiseMeter.noise.listen(
+      (reading) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _currentNoiseDb = reading.meanDecibel;
+          _sensorMessage = 'Sensors running.';
+        });
+      },
+      onError: (_) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _sensorMessage = 'Noise sensor unavailable.';
+        });
+      },
+    );
+
+    _lightSubscription = _light.lightSensorStream.listen(
+      (lux) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _currentLightLux = lux < 0 ? null : lux;
+        });
+      },
+      onError: (_) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _sensorMessage = 'Light sensor unavailable.';
+        });
+      },
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isSensorScanning = true;
+      _sensorMessage = 'Sensors running.';
+    });
+  }
+
+  Future<void> _stopSensors() async {
+    await _noiseSubscription?.cancel();
+    await _lightSubscription?.cancel();
+
+    _noiseSubscription = null;
+    _lightSubscription = null;
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isSensorScanning = false;
+      _sensorMessage = 'Sensors paused.';
+    });
   }
 
   @override
@@ -700,6 +826,19 @@ class _MapScreenState extends State<MapScreen> {
                               icon: const Icon(Icons.bookmark_add),
                               label: const Text('Save place'),
                             ),
+                            FilledButton.tonalIcon(
+                              onPressed: _toggleSensors,
+                              icon: Icon(
+                                _isSensorScanning
+                                    ? Icons.sensors_off
+                                    : Icons.sensors,
+                              ),
+                              label: Text(
+                                _isSensorScanning
+                                    ? 'Stop sensors'
+                                    : 'Start sensors',
+                              ),
+                            ),
                           ],
                         ),
                         if (location != null) ...[
@@ -711,6 +850,30 @@ class _MapScreenState extends State<MapScreen> {
                             ),
                           ),
                         ],
+                        const SizedBox(height: 10),
+                        Text(
+                          _sensorMessage,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: Colors.white70,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _SensorChip(
+                              icon: Icons.graphic_eq,
+                              label:
+                                  'Noise: ${_formatNoiseValue(_currentNoiseDb)}',
+                            ),
+                            _SensorChip(
+                              icon: Icons.wb_sunny_outlined,
+                              label:
+                                  'Light: ${_formatLightValue(_currentLightLux)}',
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
@@ -893,9 +1056,16 @@ class _SavedPlacesSheet extends StatelessWidget {
 }
 
 class _SavePlaceDialog extends StatefulWidget {
-  const _SavePlaceDialog({required this.point, this.existingPlace});
+  const _SavePlaceDialog({
+    required this.point,
+    this.noiseDb,
+    this.lightLux,
+    this.existingPlace,
+  });
 
   final LatLng point;
+  final double? noiseDb;
+  final int? lightLux;
   final SavedPlaceLog? existingPlace;
 
   @override
@@ -948,6 +1118,8 @@ class _SavePlaceDialogState extends State<_SavePlaceDialog> {
             name: name,
             placeType: _placeType,
             comment: comment,
+            noiseDb: widget.noiseDb,
+            lightLux: widget.lightLux,
           ),
     );
   }
@@ -1010,6 +1182,13 @@ class _SavePlaceDialogState extends State<_SavePlaceDialog> {
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: const Color(0xFF7EE4C5)),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Noise ${_formatNoiseValue(widget.existingPlace?.noiseDb ?? widget.noiseDb)} | Light ${_formatLightValue(widget.existingPlace?.lightLux ?? widget.lightLux)}',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.white70),
             ),
           ],
         ),
@@ -1087,6 +1266,59 @@ class _SavedPlaceSummary extends StatelessWidget {
               '${place.point.latitude.toStringAsFixed(4)}, ${place.point.longitude.toStringAsFixed(4)}  •  ${_formatTime(place.recordedAt)}',
               style: theme.textTheme.bodySmall?.copyWith(color: Colors.white54),
             ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _SensorChip(
+                  icon: Icons.graphic_eq,
+                  label:
+                      '${_noiseLevelFromDb(place.noiseDb)} (${_formatNoiseValue(place.noiseDb)})',
+                ),
+                _SensorChip(
+                  icon: Icons.wb_sunny_outlined,
+                  label:
+                      '${_lightLevelFromLux(place.lightLux)} (${_formatLightValue(place.lightLux)})',
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _environmentSuggestion(place),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: const Color(0xFF7EE4C5),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SensorChip extends StatelessWidget {
+  const _SensorChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xAA0F3029),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: const Color(0xFF7EE4C5)),
+            const SizedBox(width: 6),
+            Text(label, style: Theme.of(context).textTheme.labelSmall),
           ],
         ),
       ),
@@ -1207,6 +1439,59 @@ List<SavedPlaceLog> _filterPlacesByType(
   }
 
   return places.where((place) => place.placeType == placeType).toList();
+}
+
+String _formatNoiseValue(double? value) {
+  return value == null ? 'Unknown' : '${value.toStringAsFixed(1)} dB';
+}
+
+String _formatLightValue(int? value) {
+  return value == null ? 'Unknown' : '$value lux';
+}
+
+String _noiseLevelFromDb(double? value) {
+  if (value == null) {
+    return 'Noise unknown';
+  }
+  if (value < 55) {
+    return 'Quiet';
+  }
+  if (value < 72) {
+    return 'Moderate';
+  }
+  return 'Loud';
+}
+
+String _lightLevelFromLux(int? value) {
+  if (value == null) {
+    return 'Light unknown';
+  }
+  if (value < 80) {
+    return 'Dim';
+  }
+  if (value < 500) {
+    return 'Balanced';
+  }
+  return 'Bright';
+}
+
+String _environmentSuggestion(SavedPlaceLog place) {
+  final noise = _noiseLevelFromDb(place.noiseDb);
+  final light = _lightLevelFromLux(place.lightLux);
+
+  if (noise == 'Quiet' && (light == 'Balanced' || light == 'Bright')) {
+    return 'Suggested use: focused study.';
+  }
+  if (noise == 'Quiet' && light == 'Dim') {
+    return 'Suggested use: rest or quiet reading.';
+  }
+  if (noise == 'Loud' && light == 'Bright') {
+    return 'Suggested use: social activity.';
+  }
+  if (noise == 'Moderate') {
+    return 'Suggested use: casual work or short break.';
+  }
+  return 'Suggested use: add more sensor readings.';
 }
 
 Color _placeTypeColor(String placeType) {
