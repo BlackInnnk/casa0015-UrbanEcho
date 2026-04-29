@@ -146,6 +146,14 @@ class _AppShellState extends State<AppShell> {
     _persistSavedPlaces();
   }
 
+  void _clearAllPlaces() {
+    setState(() {
+      _savedPlaces.clear();
+      _placeToFocus = null;
+    });
+    _persistSavedPlaces();
+  }
+
   void _updatePlace(SavedPlaceLog oldPlace, SavedPlaceLog updatedPlace) {
     final index = _savedPlaces.indexOf(oldPlace);
     if (index == -1) {
@@ -229,6 +237,7 @@ class _AppShellState extends State<AppShell> {
         onViewPlace: _viewPlaceOnMap,
         onUpdatePlace: _updatePlace,
         onDeletePlace: _deletePlace,
+        onClearAllPlaces: _clearAllPlaces,
       ),
     ];
 
@@ -351,6 +360,7 @@ class HistoryScreen extends StatefulWidget {
     required this.onViewPlace,
     required this.onUpdatePlace,
     required this.onDeletePlace,
+    required this.onClearAllPlaces,
   });
 
   final List<SavedPlaceLog> places;
@@ -358,6 +368,7 @@ class HistoryScreen extends StatefulWidget {
   final void Function(SavedPlaceLog oldPlace, SavedPlaceLog updatedPlace)
   onUpdatePlace;
   final ValueChanged<SavedPlaceLog> onDeletePlace;
+  final VoidCallback onClearAllPlaces;
 
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
@@ -394,6 +405,34 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
+  Future<void> _confirmClearAll() async {
+    final shouldClear = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear all places?'),
+        content: const Text(
+          'This removes every saved place from local storage. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Clear all'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldClear != true) {
+      return;
+    }
+
+    widget.onClearAllPlaces();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -418,13 +457,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
             style: theme.textTheme.titleMedium?.copyWith(color: Colors.white70),
           ),
           const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.tonalIcon(
-              onPressed: widget.places.isEmpty ? null : _showJsonExport,
-              icon: const Icon(Icons.data_object),
-              label: const Text('Export JSON'),
-            ),
+          _HistorySummary(places: widget.places),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: widget.places.isEmpty ? null : _showJsonExport,
+                icon: const Icon(Icons.data_object),
+                label: const Text('Export JSON'),
+              ),
+              TextButton.icon(
+                onPressed: widget.places.isEmpty ? null : _confirmClearAll,
+                icon: const Icon(Icons.delete_sweep_outlined),
+                label: const Text('Clear all'),
+              ),
+            ],
           ),
           const SizedBox(height: 24),
           _PlaceTypeFilter(
@@ -544,6 +593,79 @@ class _HistoryPlaceCard extends StatelessWidget {
     }
 
     onUpdatePlace(place, updatedPlace);
+  }
+}
+
+class _HistorySummary extends StatelessWidget {
+  const _HistorySummary({required this.places});
+
+  final List<SavedPlaceLog> places;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final averageNoise = _averageNoiseDb(places);
+    final averageLight = _averageLightLux(places);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A2127),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Data summary',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _SummaryChip(label: 'Total: ${places.length}'),
+              ..._placeTypes.map(
+                (type) => _SummaryChip(
+                  label: '$type: ${_placeTypeCount(places, type)}',
+                ),
+              ),
+              _SummaryChip(
+                label: 'Avg noise: ${_formatNoiseValue(averageNoise)}',
+              ),
+              _SummaryChip(
+                label: 'Avg light: ${_formatLightValue(averageLight)}',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryChip extends StatelessWidget {
+  const _SummaryChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xAA0F3029),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Text(label, style: Theme.of(context).textTheme.labelMedium),
+      ),
+    );
   }
 }
 
@@ -1644,6 +1766,34 @@ List<SavedPlaceLog> _filterPlacesByType(
   }
 
   return places.where((place) => place.placeType == placeType).toList();
+}
+
+int _placeTypeCount(List<SavedPlaceLog> places, String placeType) {
+  return places.where((place) => place.placeType == placeType).length;
+}
+
+double? _averageNoiseDb(List<SavedPlaceLog> places) {
+  final values = places
+      .map((place) => place.noiseDb)
+      .whereType<double>()
+      .toList();
+  if (values.isEmpty) {
+    return null;
+  }
+
+  return values.reduce((sum, value) => sum + value) / values.length;
+}
+
+int? _averageLightLux(List<SavedPlaceLog> places) {
+  final values = places
+      .map((place) => place.lightLux)
+      .whereType<int>()
+      .toList();
+  if (values.isEmpty) {
+    return null;
+  }
+
+  return (values.reduce((sum, value) => sum + value) / values.length).round();
 }
 
 String _formatNoiseValue(double? value) {
