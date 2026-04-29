@@ -12,6 +12,14 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 const List<String> _placeTypes = ['Study', 'Rest', 'Social'];
+const List<String> _historySortOptions = [
+  'Newest',
+  'Oldest',
+  'Quietest',
+  'Noisiest',
+  'Brightest',
+  'Dimmest',
+];
 
 void main() {
   runApp(const UrbanEchoApp());
@@ -375,7 +383,17 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
+  final TextEditingController _searchController = TextEditingController();
+
   String _selectedPlaceType = 'All';
+  String _searchQuery = '';
+  String _selectedSort = 'Newest';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   void _showJsonExport() {
     final formattedJson = const JsonEncoder.withIndent(
@@ -436,9 +454,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final filteredPlaces = _filterPlacesByType(
-      widget.places,
-      _selectedPlaceType,
+    final filteredPlaces = _sortPlaces(
+      _searchPlaces(
+        _filterPlacesByType(widget.places, _selectedPlaceType),
+        _searchQuery,
+      ),
+      _selectedSort,
     );
 
     return SafeArea(
@@ -485,6 +506,31 @@ class _HistoryScreenState extends State<HistoryScreen> {
             },
           ),
           const SizedBox(height: 16),
+          _HistorySearchAndSort(
+            controller: _searchController,
+            selectedSort: _selectedSort,
+            onSearchChanged: (value) {
+              setState(() {
+                _searchQuery = value;
+              });
+            },
+            onClearSearch: () {
+              _searchController.clear();
+              setState(() {
+                _searchQuery = '';
+              });
+            },
+            onSortChanged: (value) {
+              if (value == null) {
+                return;
+              }
+
+              setState(() {
+                _selectedSort = value;
+              });
+            },
+          ),
+          const SizedBox(height: 16),
           if (widget.places.isEmpty)
             Container(
               padding: const EdgeInsets.all(20),
@@ -509,7 +555,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 border: Border.all(color: Colors.white12),
               ),
               child: Text(
-                'No $_selectedPlaceType places saved yet.',
+                _searchQuery.trim().isEmpty
+                    ? 'No $_selectedPlaceType places saved yet.'
+                    : 'No places match this search.',
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: Colors.white70,
                 ),
@@ -529,6 +577,71 @@ class _HistoryScreenState extends State<HistoryScreen> {
             ),
         ],
       ),
+    );
+  }
+}
+
+class _HistorySearchAndSort extends StatelessWidget {
+  const _HistorySearchAndSort({
+    required this.controller,
+    required this.selectedSort,
+    required this.onSearchChanged,
+    required this.onClearSearch,
+    required this.onSortChanged,
+  });
+
+  final TextEditingController controller;
+  final String selectedSort;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onClearSearch;
+  final ValueChanged<String?> onSortChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        TextField(
+          controller: controller,
+          onChanged: onSearchChanged,
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.search),
+            suffixIcon: controller.text.isEmpty
+                ? null
+                : IconButton(
+                    onPressed: onClearSearch,
+                    icon: const Icon(Icons.clear),
+                    tooltip: 'Clear search',
+                  ),
+            hintText: 'Search by name, comment, or type',
+            filled: true,
+            fillColor: const Color(0xFF1A2127),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(18),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          initialValue: selectedSort,
+          decoration: InputDecoration(
+            labelText: 'Sort records',
+            filled: true,
+            fillColor: const Color(0xFF1A2127),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(18),
+              borderSide: BorderSide.none,
+            ),
+          ),
+          items: _historySortOptions
+              .map(
+                (option) =>
+                    DropdownMenuItem(value: option, child: Text(option)),
+              )
+              .toList(),
+          onChanged: onSortChanged,
+        ),
+      ],
     );
   }
 }
@@ -1766,6 +1879,55 @@ List<SavedPlaceLog> _filterPlacesByType(
   }
 
   return places.where((place) => place.placeType == placeType).toList();
+}
+
+List<SavedPlaceLog> _searchPlaces(List<SavedPlaceLog> places, String query) {
+  final normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery.isEmpty) {
+    return places;
+  }
+
+  return places.where((place) {
+    final searchableText = [
+      place.name,
+      place.comment,
+      place.placeType,
+      _formatNoiseValue(place.noiseDb),
+      _formatLightValue(place.lightLux),
+    ].join(' ').toLowerCase();
+
+    return searchableText.contains(normalizedQuery);
+  }).toList();
+}
+
+List<SavedPlaceLog> _sortPlaces(List<SavedPlaceLog> places, String sortMode) {
+  final sortedPlaces = List<SavedPlaceLog>.of(places);
+
+  switch (sortMode) {
+    case 'Oldest':
+      sortedPlaces.sort((a, b) => a.recordedAt.compareTo(b.recordedAt));
+    case 'Quietest':
+      sortedPlaces.sort(
+        (a, b) => (a.noiseDb ?? double.infinity).compareTo(
+          b.noiseDb ?? double.infinity,
+        ),
+      );
+    case 'Noisiest':
+      sortedPlaces.sort((a, b) => (b.noiseDb ?? -1).compareTo(a.noiseDb ?? -1));
+    case 'Brightest':
+      sortedPlaces.sort(
+        (a, b) => (b.lightLux ?? -1).compareTo(a.lightLux ?? -1),
+      );
+    case 'Dimmest':
+      sortedPlaces.sort(
+        (a, b) => (a.lightLux ?? 1 << 30).compareTo(b.lightLux ?? 1 << 30),
+      );
+    case 'Newest':
+    default:
+      sortedPlaces.sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
+  }
+
+  return sortedPlaces;
 }
 
 int _placeTypeCount(List<SavedPlaceLog> places, String placeType) {
