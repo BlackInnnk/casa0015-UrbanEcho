@@ -15,6 +15,9 @@ const List<String> _placeTypes = ['Study', 'Rest', 'Social'];
 const List<String> _historySortOptions = [
   'Newest',
   'Oldest',
+  'Best study fit',
+  'Best rest fit',
+  'Best social fit',
   'Quietest',
   'Noisiest',
   'Brightest',
@@ -719,6 +722,9 @@ class _HistorySummary extends StatelessWidget {
     final theme = Theme.of(context);
     final averageNoise = _averageNoiseDb(places);
     final averageLight = _averageLightLux(places);
+    final bestStudyPlace = _bestPlaceFor(places, 'Study');
+    final bestRestPlace = _bestPlaceFor(places, 'Rest');
+    final bestSocialPlace = _bestPlaceFor(places, 'Social');
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -755,6 +761,45 @@ class _HistorySummary extends StatelessWidget {
               ),
             ],
           ),
+          if (places.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Divider(color: Colors.white.withValues(alpha: 0.08)),
+            const SizedBox(height: 10),
+            Text(
+              'Top picks',
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _TopPickChip(
+                  label: 'Study',
+                  place: bestStudyPlace,
+                  score: bestStudyPlace == null
+                      ? null
+                      : _studyScore(bestStudyPlace),
+                ),
+                _TopPickChip(
+                  label: 'Rest',
+                  place: bestRestPlace,
+                  score: bestRestPlace == null
+                      ? null
+                      : _restScore(bestRestPlace),
+                ),
+                _TopPickChip(
+                  label: 'Social',
+                  place: bestSocialPlace,
+                  score: bestSocialPlace == null
+                      ? null
+                      : _socialScore(bestSocialPlace),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -777,6 +822,37 @@ class _SummaryChip extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         child: Text(label, style: Theme.of(context).textTheme.labelMedium),
+      ),
+    );
+  }
+}
+
+class _TopPickChip extends StatelessWidget {
+  const _TopPickChip({
+    required this.label,
+    required this.place,
+    required this.score,
+  });
+
+  final String label;
+  final SavedPlaceLog? place;
+  final int? score;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = place == null
+        ? '$label: no data'
+        : '$label: ${place!.name} (${score ?? 0}/100)';
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xAA16263A),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Text(text, style: Theme.of(context).textTheme.labelMedium),
       ),
     );
   }
@@ -1723,13 +1799,8 @@ class _SavedPlaceSummary extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              _environmentSuggestion(place),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: const Color(0xFF7EE4C5),
-              ),
-            ),
+            const SizedBox(height: 8),
+            _EnvironmentFitCard(assessment: _assessEnvironment(place)),
           ],
         ),
       ),
@@ -1759,6 +1830,69 @@ class _SensorChip extends StatelessWidget {
             Icon(icon, size: 14, color: const Color(0xFF7EE4C5)),
             const SizedBox(width: 6),
             Text(label, style: Theme.of(context).textTheme.labelSmall),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EnvironmentFitCard extends StatelessWidget {
+  const _EnvironmentFitCard({required this.assessment});
+
+  final _EnvironmentAssessment assessment;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: assessment.color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: assessment.color.withValues(alpha: 0.35)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(assessment.icon, size: 16, color: assessment.color),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    assessment.label,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: assessment.color,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${assessment.score}/100',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: assessment.color,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                minHeight: 6,
+                value: assessment.score / 100,
+                backgroundColor: Colors.white12,
+                color: assessment.color,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              assessment.reason,
+              style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
+            ),
           ],
         ),
       ),
@@ -1863,6 +1997,22 @@ class _MapMarker extends StatelessWidget {
   }
 }
 
+class _EnvironmentAssessment {
+  const _EnvironmentAssessment({
+    required this.label,
+    required this.reason,
+    required this.score,
+    required this.icon,
+    required this.color,
+  });
+
+  final String label;
+  final String reason;
+  final int score;
+  final IconData icon;
+  final Color color;
+}
+
 String _formatTime(DateTime value) {
   final hour = value.hour.toString().padLeft(2, '0');
   final minute = value.minute.toString().padLeft(2, '0');
@@ -1906,6 +2056,12 @@ List<SavedPlaceLog> _sortPlaces(List<SavedPlaceLog> places, String sortMode) {
   switch (sortMode) {
     case 'Oldest':
       sortedPlaces.sort((a, b) => a.recordedAt.compareTo(b.recordedAt));
+    case 'Best study fit':
+      sortedPlaces.sort((a, b) => _studyScore(b).compareTo(_studyScore(a)));
+    case 'Best rest fit':
+      sortedPlaces.sort((a, b) => _restScore(b).compareTo(_restScore(a)));
+    case 'Best social fit':
+      sortedPlaces.sort((a, b) => _socialScore(b).compareTo(_socialScore(a)));
     case 'Quietest':
       sortedPlaces.sort(
         (a, b) => (a.noiseDb ?? double.infinity).compareTo(
@@ -1932,6 +2088,34 @@ List<SavedPlaceLog> _sortPlaces(List<SavedPlaceLog> places, String sortMode) {
 
 int _placeTypeCount(List<SavedPlaceLog> places, String placeType) {
   return places.where((place) => place.placeType == placeType).length;
+}
+
+SavedPlaceLog? _bestPlaceFor(List<SavedPlaceLog> places, String targetUse) {
+  if (places.isEmpty) {
+    return null;
+  }
+
+  final placesWithSensorData = places
+      .where((place) => place.noiseDb != null || place.lightLux != null)
+      .toList();
+  if (placesWithSensorData.isEmpty) {
+    return null;
+  }
+
+  return placesWithSensorData.reduce((best, next) {
+    return _scoreForUse(next, targetUse) > _scoreForUse(best, targetUse)
+        ? next
+        : best;
+  });
+}
+
+int _scoreForUse(SavedPlaceLog place, String targetUse) {
+  return switch (targetUse) {
+    'Study' => _studyScore(place),
+    'Rest' => _restScore(place),
+    'Social' => _socialScore(place),
+    _ => 0,
+  };
 }
 
 double? _averageNoiseDb(List<SavedPlaceLog> places) {
@@ -1992,23 +2176,118 @@ String _lightLevelFromLux(int? value) {
   return 'Bright';
 }
 
-String _environmentSuggestion(SavedPlaceLog place) {
-  final noise = _noiseLevelFromDb(place.noiseDb);
-  final light = _lightLevelFromLux(place.lightLux);
+_EnvironmentAssessment _assessEnvironment(SavedPlaceLog place) {
+  if (place.noiseDb == null && place.lightLux == null) {
+    return const _EnvironmentAssessment(
+      label: 'Needs sensor data',
+      reason: 'Start sensors before saving to calculate a place fit score.',
+      score: 0,
+      icon: Icons.sensors,
+      color: Color(0xFF8B97A4),
+    );
+  }
 
-  if (noise == 'Quiet' && (light == 'Balanced' || light == 'Bright')) {
-    return 'Suggested use: focused study.';
-  }
-  if (noise == 'Quiet' && light == 'Dim') {
-    return 'Suggested use: rest or quiet reading.';
-  }
-  if (noise == 'Loud' && light == 'Bright') {
-    return 'Suggested use: social activity.';
-  }
-  if (noise == 'Moderate') {
-    return 'Suggested use: casual work or short break.';
-  }
-  return 'Suggested use: add more sensor readings.';
+  final scores = <String, int>{
+    'Study': _studyScore(place),
+    'Rest': _restScore(place),
+    'Social': _socialScore(place),
+  };
+  final bestUse = scores.entries.reduce(
+    (best, next) => next.value > best.value ? next : best,
+  );
+
+  return switch (bestUse.key) {
+    'Study' => _EnvironmentAssessment(
+      label: 'Best for study',
+      reason:
+          'Quietness and usable light make this place stronger for focused work.',
+      score: bestUse.value,
+      icon: Icons.menu_book_outlined,
+      color: const Color(0xFF7EE4C5),
+    ),
+    'Rest' => _EnvironmentAssessment(
+      label: 'Best for rest',
+      reason:
+          'Lower stimulation makes this place better for breaks or reading.',
+      score: bestUse.value,
+      icon: Icons.self_improvement_outlined,
+      color: const Color(0xFF9AB7FF),
+    ),
+    _ => _EnvironmentAssessment(
+      label: 'Best for social',
+      reason:
+          'Higher activity and enough light make this place better for meeting others.',
+      score: bestUse.value,
+      icon: Icons.groups_2_outlined,
+      color: const Color(0xFFFFC36A),
+    ),
+  };
+}
+
+int _studyScore(SavedPlaceLog place) {
+  final noiseScore = switch (place.noiseDb) {
+    null => 35,
+    < 45 => 100,
+    < 55 => 90,
+    < 65 => 65,
+    < 75 => 35,
+    _ => 10,
+  };
+  final lightScore = switch (place.lightLux) {
+    null => 35,
+    < 80 => 35,
+    < 200 => 70,
+    < 700 => 100,
+    < 1100 => 75,
+    _ => 45,
+  };
+
+  return _weightedScore(noiseScore, lightScore);
+}
+
+int _restScore(SavedPlaceLog place) {
+  final noiseScore = switch (place.noiseDb) {
+    null => 35,
+    < 45 => 100,
+    < 55 => 85,
+    < 65 => 55,
+    < 75 => 25,
+    _ => 10,
+  };
+  final lightScore = switch (place.lightLux) {
+    null => 35,
+    < 40 => 95,
+    < 180 => 100,
+    < 450 => 70,
+    < 800 => 40,
+    _ => 20,
+  };
+
+  return _weightedScore(noiseScore, lightScore);
+}
+
+int _socialScore(SavedPlaceLog place) {
+  final noiseScore = switch (place.noiseDb) {
+    null => 35,
+    < 45 => 40,
+    < 60 => 65,
+    < 78 => 100,
+    < 90 => 75,
+    _ => 45,
+  };
+  final lightScore = switch (place.lightLux) {
+    null => 35,
+    < 80 => 45,
+    < 250 => 75,
+    < 900 => 95,
+    _ => 70,
+  };
+
+  return _weightedScore(noiseScore, lightScore);
+}
+
+int _weightedScore(int noiseScore, int lightScore) {
+  return ((noiseScore * 0.65) + (lightScore * 0.35)).round();
 }
 
 Color _placeTypeColor(String placeType) {
