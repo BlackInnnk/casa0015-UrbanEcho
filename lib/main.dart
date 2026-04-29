@@ -1207,6 +1207,26 @@ class _MapScreenState extends State<MapScreen> {
     _focusPlace(selectedPlace);
   }
 
+  Future<void> _showSharedPlacesSheet() async {
+    final selectedPlace = await showModalBottomSheet<SharedPlaceLog>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF111417),
+      builder: (context) => _SharedPlacesSheet(
+        places: _sharedPlaces,
+        currentLocation: _currentLocation,
+        onSaveLocally: _saveSharedPlaceLocally,
+      ),
+    );
+
+    if (selectedPlace == null || !mounted) {
+      return;
+    }
+
+    _mapController.move(selectedPlace.place.point, 17);
+    await _showSharedPlaceDetails(selectedPlace);
+  }
+
   Future<void> _showPlaceDetails(SavedPlaceLog place) async {
     await showDialog<void>(
       context: context,
@@ -1244,6 +1264,14 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ),
         actions: [
+          TextButton.icon(
+            onPressed: () {
+              _saveSharedPlaceLocally(sharedPlace);
+              Navigator.of(context).pop();
+            },
+            icon: const Icon(Icons.bookmark_add_outlined),
+            label: const Text('Save locally'),
+          ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Close'),
@@ -1251,6 +1279,21 @@ class _MapScreenState extends State<MapScreen> {
         ],
       ),
     );
+  }
+
+  void _saveSharedPlaceLocally(SharedPlaceLog sharedPlace) {
+    final place = sharedPlace.place.copyWith(
+      name: '${sharedPlace.place.name} (shared)',
+    );
+    widget.onSavePlace(place);
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _statusMessage = '${sharedPlace.place.name} saved locally.';
+    });
   }
 
   Future<void> _toggleSharedMap() async {
@@ -1545,7 +1588,6 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final location = _currentLocation;
     final visibleSavedPlaces = _filterPlacesByType(
       widget.savedPlaces,
@@ -1633,171 +1675,43 @@ class _MapScreenState extends State<MapScreen> {
                   ),
                 ],
               ),
-              Positioned(
-                left: 16,
-                right: 16,
-                top: 16,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: const Color(0xCC111417),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          location == null
-                              ? 'Waiting for your location'
-                              : 'Current location ready',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          _statusMessage,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: Colors.white70,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            FilledButton.icon(
-                              onPressed: _isLoading
-                                  ? null
-                                  : _loadCurrentLocation,
-                              icon: const Icon(Icons.my_location),
-                              label: const Text('Locate me'),
-                            ),
-                            FilledButton.tonalIcon(
-                              onPressed: location == null
-                                  ? null
-                                  : _saveCurrentPlace,
-                              icon: const Icon(Icons.bookmark_add),
-                              label: const Text('Save place'),
-                            ),
-                            FilledButton.tonalIcon(
-                              onPressed: _toggleSensors,
-                              icon: Icon(
-                                _isSensorScanning
-                                    ? Icons.sensors_off
-                                    : Icons.sensors,
-                              ),
-                              label: Text(
-                                _isSensorScanning
-                                    ? 'Stop sensors'
-                                    : 'Start sensors',
-                              ),
-                            ),
-                            FilledButton.tonalIcon(
-                              onPressed: _isMqttConnecting
-                                  ? null
-                                  : _toggleSharedMap,
-                              icon: Icon(
-                                _isMqttConnected
-                                    ? Icons.cloud_done_outlined
-                                    : Icons.cloud_outlined,
-                              ),
-                              label: Text(
-                                _isMqttConnected
-                                    ? 'Shared online'
-                                    : 'Shared map',
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (location != null) ...[
-                          const SizedBox(height: 10),
-                          Text(
-                            'Lat ${location.latitude.toStringAsFixed(5)} | Lng ${location.longitude.toStringAsFixed(5)}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: const Color(0xFF7EE4C5),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 10),
-                        Text(
-                          _sensorMessage,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.white70,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _SensorChip(
-                              icon: Icons.graphic_eq,
-                              label:
-                                  'Noise: ${_formatNoiseValue(_currentNoiseDb)}',
-                            ),
-                            _SensorChip(
-                              icon: Icons.wb_sunny_outlined,
-                              label:
-                                  'Light: ${_formatLightValue(_currentLightLux)}',
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        _EnvironmentFitCard(
-                          assessment: _assessEnvironmentValues(
-                            noiseDb: _currentNoiseDb,
-                            lightLux: _currentLightLux,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                _sharedMapMessage,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: Colors.white70,
-                                ),
-                              ),
-                            ),
-                            FilterChip(
-                              label: Text('Shared (${_sharedPlaces.length})'),
-                              selected: _showSharedPlaces,
-                              onSelected: (value) {
-                                setState(() {
-                                  _showSharedPlaces = value;
-                                });
-                              },
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                right: 16,
-                bottom: 16,
-                child: FilledButton.tonalIcon(
-                  onPressed: _showSavedPlaces,
-                  icon: const Icon(Icons.list_alt),
-                  label: Text('Saved (${widget.savedPlaces.length})'),
-                ),
-              ),
-              Positioned(
-                left: 16,
-                right: 132,
-                bottom: 16,
-                child: _MapPlaceFilter(
+              DraggableScrollableSheet(
+                initialChildSize: 0.24,
+                minChildSize: 0.14,
+                maxChildSize: 0.74,
+                builder: (context, scrollController) => _MapControlSheet(
+                  scrollController: scrollController,
+                  location: location,
+                  isLoading: _isLoading,
+                  isSensorScanning: _isSensorScanning,
+                  isMqttConnecting: _isMqttConnecting,
+                  isMqttConnected: _isMqttConnected,
+                  showSharedPlaces: _showSharedPlaces,
+                  statusMessage: _statusMessage,
+                  sensorMessage: _sensorMessage,
+                  sharedMapMessage: _sharedMapMessage,
+                  currentNoiseDb: _currentNoiseDb,
+                  currentLightLux: _currentLightLux,
                   selectedPlaceType: _selectedMapPlaceType,
-                  visibleCount: visibleSavedPlaces.length,
-                  totalCount: widget.savedPlaces.length,
-                  onSelected: (placeType) {
+                  visibleSavedCount: visibleSavedPlaces.length,
+                  savedCount: widget.savedPlaces.length,
+                  sharedCount: _sharedPlaces.length,
+                  onLocate: _isLoading ? null : _loadCurrentLocation,
+                  onSavePlace: location == null ? null : _saveCurrentPlace,
+                  onToggleSensors: _toggleSensors,
+                  onToggleSharedMap: _isMqttConnecting
+                      ? null
+                      : _toggleSharedMap,
+                  onShowSavedPlaces: _showSavedPlaces,
+                  onShowSharedPlaces: _sharedPlaces.isEmpty
+                      ? null
+                      : _showSharedPlacesSheet,
+                  onToggleSharedPlaces: (value) {
+                    setState(() {
+                      _showSharedPlaces = value;
+                    });
+                  },
+                  onSelectPlaceType: (placeType) {
                     setState(() {
                       _selectedMapPlaceType = placeType;
                     });
@@ -1813,47 +1727,228 @@ class _MapScreenState extends State<MapScreen> {
   }
 }
 
-class _MapPlaceFilter extends StatelessWidget {
-  const _MapPlaceFilter({
+class _MapControlSheet extends StatelessWidget {
+  const _MapControlSheet({
+    required this.scrollController,
+    required this.location,
+    required this.isLoading,
+    required this.isSensorScanning,
+    required this.isMqttConnecting,
+    required this.isMqttConnected,
+    required this.showSharedPlaces,
+    required this.statusMessage,
+    required this.sensorMessage,
+    required this.sharedMapMessage,
+    required this.currentNoiseDb,
+    required this.currentLightLux,
     required this.selectedPlaceType,
-    required this.visibleCount,
-    required this.totalCount,
-    required this.onSelected,
+    required this.visibleSavedCount,
+    required this.savedCount,
+    required this.sharedCount,
+    required this.onLocate,
+    required this.onSavePlace,
+    required this.onToggleSensors,
+    required this.onToggleSharedMap,
+    required this.onShowSavedPlaces,
+    required this.onShowSharedPlaces,
+    required this.onToggleSharedPlaces,
+    required this.onSelectPlaceType,
   });
 
+  final ScrollController scrollController;
+  final LatLng? location;
+  final bool isLoading;
+  final bool isSensorScanning;
+  final bool isMqttConnecting;
+  final bool isMqttConnected;
+  final bool showSharedPlaces;
+  final String statusMessage;
+  final String sensorMessage;
+  final String sharedMapMessage;
+  final double? currentNoiseDb;
+  final int? currentLightLux;
   final String selectedPlaceType;
-  final int visibleCount;
-  final int totalCount;
-  final ValueChanged<String> onSelected;
+  final int visibleSavedCount;
+  final int savedCount;
+  final int sharedCount;
+  final VoidCallback? onLocate;
+  final VoidCallback? onSavePlace;
+  final VoidCallback onToggleSensors;
+  final VoidCallback? onToggleSharedMap;
+  final VoidCallback onShowSavedPlaces;
+  final VoidCallback? onShowSharedPlaces;
+  final ValueChanged<bool> onToggleSharedPlaces;
+  final ValueChanged<String> onSelectPlaceType;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xCC111417),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xEE111417),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white12),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x66000000),
+              blurRadius: 18,
+              offset: Offset(0, -6),
+            ),
+          ],
+        ),
+        child: ListView(
+          controller: scrollController,
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
           children: [
+            Center(
+              child: Container(
+                width: 42,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    location == null
+                        ? 'Waiting for location'
+                        : 'UrbanEcho controls',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: onShowSavedPlaces,
+                  icon: const Icon(Icons.list_alt),
+                  label: Text('Saved ($savedCount)'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              statusMessage,
+              style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
+            ),
+            if (location != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Lat ${location!.latitude.toStringAsFixed(5)} | Lng ${location!.longitude.toStringAsFixed(5)}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFF7EE4C5),
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: onLocate,
+                  icon: const Icon(Icons.my_location),
+                  label: Text(isLoading ? 'Locating...' : 'Locate'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: onSavePlace,
+                  icon: const Icon(Icons.bookmark_add),
+                  label: const Text('Save'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: onToggleSensors,
+                  icon: Icon(
+                    isSensorScanning ? Icons.sensors_off : Icons.sensors,
+                  ),
+                  label: Text(isSensorScanning ? 'Stop sensors' : 'Sensors'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: onToggleSharedMap,
+                  icon: Icon(
+                    isMqttConnected
+                        ? Icons.cloud_done_outlined
+                        : Icons.cloud_outlined,
+                  ),
+                  label: Text(
+                    isMqttConnecting
+                        ? 'Connecting'
+                        : isMqttConnected
+                        ? 'Shared on'
+                        : 'Shared map',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
             Text(
               selectedPlaceType == 'All'
-                  ? 'Showing $totalCount saved'
-                  : 'Showing $visibleCount/$totalCount $selectedPlaceType',
-              style: theme.textTheme.labelSmall?.copyWith(
+                  ? 'Showing $savedCount saved places'
+                  : 'Showing $visibleSavedCount/$savedCount $selectedPlaceType places',
+              style: theme.textTheme.labelMedium?.copyWith(
                 color: Colors.white70,
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             _PlaceTypeFilter(
               selectedPlaceType: selectedPlaceType,
-              onSelected: onSelected,
+              onSelected: onSelectPlaceType,
+            ),
+            const SizedBox(height: 14),
+            Text(
+              sensorMessage,
+              style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _SensorChip(
+                  icon: Icons.graphic_eq,
+                  label: 'Noise: ${_formatNoiseValue(currentNoiseDb)}',
+                ),
+                _SensorChip(
+                  icon: Icons.wb_sunny_outlined,
+                  label: 'Light: ${_formatLightValue(currentLightLux)}',
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            _EnvironmentFitCard(
+              assessment: _assessEnvironmentValues(
+                noiseDb: currentNoiseDb,
+                lightLux: currentLightLux,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    sharedMapMessage,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.white70,
+                    ),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: onShowSharedPlaces,
+                  icon: const Icon(Icons.public),
+                  label: const Text('Browse'),
+                ),
+              ],
+            ),
+            FilterChip(
+              label: Text('Show shared markers ($sharedCount)'),
+              selected: showSharedPlaces,
+              onSelected: onToggleSharedPlaces,
             ),
           ],
         ),
@@ -2058,6 +2153,175 @@ class _SavedPlacesSheet extends StatelessWidget {
                                           ),
                                         ),
                                       ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SharedPlacesSheet extends StatelessWidget {
+  const _SharedPlacesSheet({
+    required this.places,
+    required this.currentLocation,
+    required this.onSaveLocally,
+  });
+
+  final List<SharedPlaceLog> places;
+  final LatLng? currentLocation;
+  final ValueChanged<SharedPlaceLog> onSaveLocally;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    String selectedPlaceType = 'All';
+    String selectedSort = currentLocation == null ? 'Newest' : 'Nearest';
+
+    return SafeArea(
+      child: StatefulBuilder(
+        builder: (context, setSheetState) {
+          return DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.62,
+            minChildSize: 0.32,
+            maxChildSize: 0.9,
+            builder: (context, scrollController) {
+              final filteredPlaces = _sortSharedPlacesForMapSheet(
+                _filterSharedPlacesByType(places, selectedPlaceType),
+                selectedSort,
+                currentLocation,
+              );
+
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                child: Column(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Shared places',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          selectedPlaceType == 'All'
+                              ? '${places.length}'
+                              : '${filteredPlaces.length}/${places.length}',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: const Color(0xFF7EE4C5),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    _PlaceTypeFilter(
+                      selectedPlaceType: selectedPlaceType,
+                      onSelected: (placeType) {
+                        setSheetState(() {
+                          selectedPlaceType = placeType;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedSort,
+                      decoration: InputDecoration(
+                        labelText: 'Sort shared places',
+                        filled: true,
+                        fillColor: const Color(0xFF1A2127),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      items:
+                          [
+                                if (currentLocation != null) 'Nearest',
+                                'Newest',
+                                'Oldest',
+                              ]
+                              .map(
+                                (sortMode) => DropdownMenuItem(
+                                  value: sortMode,
+                                  child: Text(sortMode),
+                                ),
+                              )
+                              .toList(),
+                      onChanged: (sortMode) {
+                        if (sortMode == null) {
+                          return;
+                        }
+
+                        setSheetState(() {
+                          selectedSort = sortMode;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    Expanded(
+                      child: places.isEmpty
+                          ? Center(
+                              child: Text(
+                                'No shared places loaded yet.',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            )
+                          : filteredPlaces.isEmpty
+                          ? Center(
+                              child: Text(
+                                'No shared $selectedPlaceType places found.',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            )
+                          : ListView.separated(
+                              controller: scrollController,
+                              itemCount: filteredPlaces.length,
+                              separatorBuilder: (context, index) =>
+                                  const SizedBox(height: 10),
+                              itemBuilder: (context, index) {
+                                final sharedPlace = filteredPlaces[index];
+                                return InkWell(
+                                  borderRadius: BorderRadius.circular(14),
+                                  onTap: () =>
+                                      Navigator.of(context).pop(sharedPlace),
+                                  child: _SavedPlaceSummary(
+                                    place: sharedPlace.place,
+                                    currentLocation: currentLocation,
+                                    trailing: IconButton(
+                                      tooltip: 'Save locally',
+                                      onPressed: () {
+                                        onSaveLocally(sharedPlace);
+                                        Navigator.of(context).pop(sharedPlace);
+                                      },
+                                      icon: const Icon(
+                                        Icons.bookmark_add_outlined,
+                                      ),
                                     ),
                                   ),
                                 );
@@ -2736,6 +3000,36 @@ List<SavedPlaceLog> _sortSavedPlacesForMapSheet(
     case 'Newest':
     default:
       sortedPlaces.sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
+  }
+
+  return sortedPlaces;
+}
+
+List<SharedPlaceLog> _sortSharedPlacesForMapSheet(
+  List<SharedPlaceLog> places,
+  String sortMode,
+  LatLng? currentLocation,
+) {
+  final sortedPlaces = List<SharedPlaceLog>.of(places);
+
+  switch (sortMode) {
+    case 'Nearest':
+      final location = currentLocation;
+      if (location == null) {
+        return sortedPlaces;
+      }
+      const distance = Distance();
+      sortedPlaces.sort(
+        (a, b) => distance(
+          location,
+          a.place.point,
+        ).compareTo(distance(location, b.place.point)),
+      );
+    case 'Oldest':
+      sortedPlaces.sort((a, b) => a.uploadedAt.compareTo(b.uploadedAt));
+    case 'Newest':
+    default:
+      sortedPlaces.sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
   }
 
   return sortedPlaces;
