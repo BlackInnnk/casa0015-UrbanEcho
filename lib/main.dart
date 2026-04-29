@@ -883,10 +883,12 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   static const LatLng _ucl = LatLng(51.5246, -0.1340);
+  static const double _nearbyPlaceThresholdMeters = 25;
 
   final MapController _mapController = MapController();
   final Light _light = Light();
   final NoiseMeter _noiseMeter = NoiseMeter();
+  final Distance _distance = const Distance();
 
   LatLng? _currentLocation;
   StreamSubscription<int>? _lightSubscription;
@@ -1021,6 +1023,20 @@ class _MapScreenState extends State<MapScreen> {
       return;
     }
 
+    final nearbyPlace = _nearestPlaceWithin(
+      location,
+      _nearbyPlaceThresholdMeters,
+    );
+    if (nearbyPlace != null) {
+      final shouldSaveNewPlace = await _confirmNearbyPlaceSave(
+        nearbyPlace.place,
+        nearbyPlace.distanceMeters,
+      );
+      if (!shouldSaveNewPlace) {
+        return;
+      }
+    }
+
     final place = await showDialog<SavedPlaceLog>(
       context: context,
       builder: (context) => _SavePlaceDialog(
@@ -1038,6 +1054,65 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _statusMessage = '${place.name} saved.';
     });
+  }
+
+  ({SavedPlaceLog place, double distanceMeters})? _nearestPlaceWithin(
+    LatLng point,
+    double thresholdMeters,
+  ) {
+    ({SavedPlaceLog place, double distanceMeters})? nearestPlace;
+
+    for (final place in widget.savedPlaces) {
+      final distanceMeters = _distance(point, place.point);
+      if (distanceMeters > thresholdMeters) {
+        continue;
+      }
+      if (nearestPlace == null ||
+          distanceMeters < nearestPlace.distanceMeters) {
+        nearestPlace = (place: place, distanceMeters: distanceMeters);
+      }
+    }
+
+    return nearestPlace;
+  }
+
+  Future<bool> _confirmNearbyPlaceSave(
+    SavedPlaceLog nearbyPlace,
+    double distanceMeters,
+  ) async {
+    final action = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Nearby place already saved'),
+        content: Text(
+          '${nearbyPlace.name} is about ${distanceMeters.round()} m away. '
+          'You can view it instead of creating a duplicate record.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop('cancel'),
+            child: const Text('Cancel'),
+          ),
+          TextButton.icon(
+            onPressed: () => Navigator.of(context).pop('view'),
+            icon: const Icon(Icons.map_outlined),
+            label: const Text('View existing'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop('save'),
+            child: const Text('Save new'),
+          ),
+        ],
+      ),
+    );
+
+    if (action == 'view') {
+      _focusPlace(nearbyPlace);
+      await _showPlaceDetails(nearbyPlace);
+      return false;
+    }
+
+    return action == 'save';
   }
 
   Future<void> _showSavedPlaces() async {
@@ -1330,6 +1405,13 @@ class _MapScreenState extends State<MapScreen> {
                                   'Light: ${_formatLightValue(_currentLightLux)}',
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 10),
+                        _EnvironmentFitCard(
+                          assessment: _assessEnvironmentValues(
+                            noiseDb: _currentNoiseDb,
+                            lightLux: _currentLightLux,
+                          ),
                         ),
                       ],
                     ),
@@ -2177,10 +2259,20 @@ String _lightLevelFromLux(int? value) {
 }
 
 _EnvironmentAssessment _assessEnvironment(SavedPlaceLog place) {
-  if (place.noiseDb == null && place.lightLux == null) {
+  return _assessEnvironmentValues(
+    noiseDb: place.noiseDb,
+    lightLux: place.lightLux,
+  );
+}
+
+_EnvironmentAssessment _assessEnvironmentValues({
+  required double? noiseDb,
+  required int? lightLux,
+}) {
+  if (noiseDb == null && lightLux == null) {
     return const _EnvironmentAssessment(
       label: 'Needs sensor data',
-      reason: 'Start sensors before saving to calculate a place fit score.',
+      reason: 'Start sensors to calculate the current environment fit score.',
       score: 0,
       icon: Icons.sensors,
       color: Color(0xFF8B97A4),
@@ -2188,9 +2280,9 @@ _EnvironmentAssessment _assessEnvironment(SavedPlaceLog place) {
   }
 
   final scores = <String, int>{
-    'Study': _studyScore(place),
-    'Rest': _restScore(place),
-    'Social': _socialScore(place),
+    'Study': _studyScoreFromValues(noiseDb: noiseDb, lightLux: lightLux),
+    'Rest': _restScoreFromValues(noiseDb: noiseDb, lightLux: lightLux),
+    'Social': _socialScoreFromValues(noiseDb: noiseDb, lightLux: lightLux),
   };
   final bestUse = scores.entries.reduce(
     (best, next) => next.value > best.value ? next : best,
@@ -2225,7 +2317,14 @@ _EnvironmentAssessment _assessEnvironment(SavedPlaceLog place) {
 }
 
 int _studyScore(SavedPlaceLog place) {
-  final noiseScore = switch (place.noiseDb) {
+  return _studyScoreFromValues(
+    noiseDb: place.noiseDb,
+    lightLux: place.lightLux,
+  );
+}
+
+int _studyScoreFromValues({required double? noiseDb, required int? lightLux}) {
+  final noiseScore = switch (noiseDb) {
     null => 35,
     < 45 => 100,
     < 55 => 90,
@@ -2233,7 +2332,7 @@ int _studyScore(SavedPlaceLog place) {
     < 75 => 35,
     _ => 10,
   };
-  final lightScore = switch (place.lightLux) {
+  final lightScore = switch (lightLux) {
     null => 35,
     < 80 => 35,
     < 200 => 70,
@@ -2246,7 +2345,11 @@ int _studyScore(SavedPlaceLog place) {
 }
 
 int _restScore(SavedPlaceLog place) {
-  final noiseScore = switch (place.noiseDb) {
+  return _restScoreFromValues(noiseDb: place.noiseDb, lightLux: place.lightLux);
+}
+
+int _restScoreFromValues({required double? noiseDb, required int? lightLux}) {
+  final noiseScore = switch (noiseDb) {
     null => 35,
     < 45 => 100,
     < 55 => 85,
@@ -2254,7 +2357,7 @@ int _restScore(SavedPlaceLog place) {
     < 75 => 25,
     _ => 10,
   };
-  final lightScore = switch (place.lightLux) {
+  final lightScore = switch (lightLux) {
     null => 35,
     < 40 => 95,
     < 180 => 100,
@@ -2267,7 +2370,14 @@ int _restScore(SavedPlaceLog place) {
 }
 
 int _socialScore(SavedPlaceLog place) {
-  final noiseScore = switch (place.noiseDb) {
+  return _socialScoreFromValues(
+    noiseDb: place.noiseDb,
+    lightLux: place.lightLux,
+  );
+}
+
+int _socialScoreFromValues({required double? noiseDb, required int? lightLux}) {
+  final noiseScore = switch (noiseDb) {
     null => 35,
     < 45 => 40,
     < 60 => 65,
@@ -2275,7 +2385,7 @@ int _socialScore(SavedPlaceLog place) {
     < 90 => 75,
     _ => 45,
   };
-  final lightScore = switch (place.lightLux) {
+  final lightScore = switch (lightLux) {
     null => 35,
     < 80 => 45,
     < 250 => 75,
