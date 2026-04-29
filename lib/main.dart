@@ -7,6 +7,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:light/light.dart';
+import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_server_client.dart';
 import 'package:noise_meter/noise_meter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -23,6 +25,23 @@ const List<String> _historySortOptions = [
   'Brightest',
   'Dimmest',
 ];
+const String _mqttHost = String.fromEnvironment(
+  'MQTT_HOST',
+  defaultValue: 'your-mqtt-host.example.com',
+);
+const int _mqttPort = int.fromEnvironment('MQTT_PORT', defaultValue: 1883);
+const String _mqttUser = String.fromEnvironment(
+  'MQTT_USER',
+  defaultValue: 'your-username',
+);
+const String _mqttPass = String.fromEnvironment(
+  'MQTT_PASS',
+  defaultValue: 'your-password',
+);
+const String _mqttTopicPrefix = String.fromEnvironment(
+  'MQTT_TOPIC_PREFIX',
+  defaultValue: 'urbanecho/places',
+);
 
 void main() {
   runApp(const UrbanEchoApp());
@@ -107,6 +126,44 @@ class SavedPlaceLog {
       comment: json['comment'] as String? ?? '',
       noiseDb: (json['noiseDb'] as num?)?.toDouble(),
       lightLux: (json['lightLux'] as num?)?.toInt(),
+    );
+  }
+}
+
+class SharedPlaceLog {
+  const SharedPlaceLog({
+    required this.id,
+    required this.source,
+    required this.uploadedAt,
+    required this.place,
+  });
+
+  final String id;
+  final String source;
+  final DateTime uploadedAt;
+  final SavedPlaceLog place;
+
+  Map<String, Object?> toJson() {
+    final assessment = _assessEnvironment(place);
+
+    return {
+      'id': id,
+      'source': source,
+      'uploadedAt': uploadedAt.toIso8601String(),
+      'bestUse': assessment.label,
+      'score': assessment.score,
+      ...place.toJson(),
+    };
+  }
+
+  factory SharedPlaceLog.fromJson(Map<String, Object?> json) {
+    return SharedPlaceLog(
+      id: json['id'] as String? ?? _sharedPlaceIdFromJson(json),
+      source: json['source'] as String? ?? 'anonymous',
+      uploadedAt:
+          DateTime.tryParse(json['uploadedAt'] as String? ?? '') ??
+          DateTime.now(),
+      place: SavedPlaceLog.fromJson(json),
     );
   }
 }
@@ -889,17 +946,27 @@ class _MapScreenState extends State<MapScreen> {
   final Light _light = Light();
   final NoiseMeter _noiseMeter = NoiseMeter();
   final Distance _distance = const Distance();
+  final String _mqttClientId =
+      'urbanecho_${DateTime.now().millisecondsSinceEpoch}';
 
   LatLng? _currentLocation;
   StreamSubscription<int>? _lightSubscription;
   StreamSubscription<NoiseReading>? _noiseSubscription;
+  StreamSubscription<List<MqttReceivedMessage<MqttMessage?>>?>?
+  _mqttSubscription;
+  MqttServerClient? _mqttClient;
+  final List<SharedPlaceLog> _sharedPlaces = [];
   double? _currentNoiseDb;
   int? _currentLightLux;
   bool _isLoading = true;
   bool _isSensorScanning = false;
+  bool _isMqttConnecting = false;
+  bool _isMqttConnected = false;
+  bool _showSharedPlaces = true;
   String _selectedMapPlaceType = 'All';
   String _statusMessage = 'Requesting location...';
   String _sensorMessage = 'Sensors are off.';
+  String _sharedMapMessage = 'Shared map is offline.';
 
   @override
   void initState() {
@@ -911,6 +978,8 @@ class _MapScreenState extends State<MapScreen> {
   void dispose() {
     _lightSubscription?.cancel();
     _noiseSubscription?.cancel();
+    _mqttSubscription?.cancel();
+    _mqttClient?.disconnect();
     super.dispose();
   }
 
@@ -1124,6 +1193,8 @@ class _MapScreenState extends State<MapScreen> {
       builder: (context) => _SavedPlacesSheet(
         places: widget.savedPlaces,
         currentLocation: _currentLocation,
+        isSharedMapConnected: _isMqttConnected,
+        onUploadPlace: _publishSharedPlace,
         onUpdatePlace: widget.onUpdatePlace,
         onDeletePlace: widget.onDeletePlace,
       ),
@@ -1146,6 +1217,234 @@ class _MapScreenState extends State<MapScreen> {
         onDeletePlace: widget.onDeletePlace,
       ),
     );
+  }
+
+  Future<void> _showSharedPlaceDetails(SharedPlaceLog sharedPlace) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Shared place'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SavedPlaceSummary(
+                place: sharedPlace.place,
+                currentLocation: _currentLocation,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Uploaded by ${sharedPlace.source} • ${_formatTime(sharedPlace.uploadedAt)}',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: Colors.white54),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _toggleSharedMap() async {
+    if (_isMqttConnected) {
+      await _disconnectSharedMap();
+      return;
+    }
+
+    await _connectSharedMap();
+  }
+
+  Future<void> _connectSharedMap() async {
+    if (_isMqttConnecting) {
+      return;
+    }
+
+    if (!_hasMqttConfig) {
+      setState(() {
+        _sharedMapMessage =
+            'MQTT config missing. Run with --dart-define values.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isMqttConnecting = true;
+      _sharedMapMessage = 'Connecting shared map...';
+    });
+
+    final client = MqttServerClient.withPort(
+      _mqttHost,
+      _mqttClientId,
+      _mqttPort,
+    );
+    client.logging(on: false);
+    client.keepAlivePeriod = 30;
+    client.autoReconnect = true;
+    client.onDisconnected = () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isMqttConnected = false;
+        _sharedMapMessage = 'Shared map disconnected.';
+      });
+    };
+    client.onConnected = () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isMqttConnected = true;
+        _sharedMapMessage = 'Shared map connected.';
+      });
+    };
+    client.connectionMessage = MqttConnectMessage()
+        .withClientIdentifier(_mqttClientId)
+        .authenticateAs(_mqttUser, _mqttPass)
+        .startClean()
+        .withWillQos(MqttQos.atLeastOnce);
+
+    try {
+      await client.connect();
+      if (client.connectionStatus?.state != MqttConnectionState.connected) {
+        client.disconnect();
+        throw StateError('MQTT connection failed');
+      }
+
+      client.subscribe('$_mqttTopicPrefix/#', MqttQos.atLeastOnce);
+      await _mqttSubscription?.cancel();
+      _mqttSubscription = client.updates?.listen(_handleSharedPlaceMessages);
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _mqttClient = client;
+        _isMqttConnected = true;
+        _isMqttConnecting = false;
+        _sharedMapMessage = 'Shared map connected.';
+      });
+    } catch (_) {
+      client.disconnect();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _mqttClient = null;
+        _isMqttConnected = false;
+        _isMqttConnecting = false;
+        _sharedMapMessage = 'Unable to connect shared map.';
+      });
+    }
+  }
+
+  Future<void> _disconnectSharedMap() async {
+    await _mqttSubscription?.cancel();
+    _mqttSubscription = null;
+    _mqttClient?.disconnect();
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _mqttClient = null;
+      _isMqttConnected = false;
+      _isMqttConnecting = false;
+      _sharedMapMessage = 'Shared map is offline.';
+    });
+  }
+
+  void _handleSharedPlaceMessages(
+    List<MqttReceivedMessage<MqttMessage?>>? messages,
+  ) {
+    if (messages == null || messages.isEmpty) {
+      return;
+    }
+
+    for (final message in messages) {
+      final payload = message.payload;
+      if (payload is! MqttPublishMessage) {
+        continue;
+      }
+
+      try {
+        final raw = MqttPublishPayload.bytesToStringAsString(
+          payload.payload.message,
+        );
+        final decoded = jsonDecode(raw);
+        if (decoded is! Map) {
+          continue;
+        }
+
+        final sharedPlace = SharedPlaceLog.fromJson(
+          Map<String, Object?>.from(decoded),
+        );
+        _upsertSharedPlace(sharedPlace);
+      } catch (_) {
+        // Ignore malformed shared messages from other clients.
+      }
+    }
+  }
+
+  void _upsertSharedPlace(SharedPlaceLog sharedPlace) {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      final index = _sharedPlaces.indexWhere((place) {
+        return place.id == sharedPlace.id;
+      });
+      if (index == -1) {
+        _sharedPlaces.insert(0, sharedPlace);
+      } else {
+        _sharedPlaces[index] = sharedPlace;
+      }
+    });
+  }
+
+  Future<void> _publishSharedPlace(SavedPlaceLog place) async {
+    if (!_isMqttConnected || _mqttClient == null) {
+      await _connectSharedMap();
+    }
+
+    final client = _mqttClient;
+    if (!_isMqttConnected || client == null) {
+      return;
+    }
+
+    final sharedPlace = SharedPlaceLog(
+      id: _sharedPlaceId(place),
+      source: 'anonymous-urbanecho',
+      uploadedAt: DateTime.now(),
+      place: place,
+    );
+    final builder = MqttClientPayloadBuilder()
+      ..addString(jsonEncode(sharedPlace.toJson()));
+
+    client.publishMessage(
+      '$_mqttTopicPrefix/${sharedPlace.id}',
+      MqttQos.atLeastOnce,
+      builder.payload!,
+      retain: true,
+    );
+    _upsertSharedPlace(sharedPlace);
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _sharedMapMessage = '${place.name} uploaded to shared map.';
+    });
   }
 
   Future<void> _toggleSensors() async {
@@ -1252,6 +1551,9 @@ class _MapScreenState extends State<MapScreen> {
       widget.savedPlaces,
       _selectedMapPlaceType,
     );
+    final visibleSharedPlaces = _showSharedPlaces
+        ? _filterSharedPlacesByType(_sharedPlaces, _selectedMapPlaceType)
+        : <SharedPlaceLog>[];
 
     return Scaffold(
       appBar: AppBar(
@@ -1297,6 +1599,22 @@ class _MapScreenState extends State<MapScreen> {
                             child: _MapMarker(
                               color: _placeTypeColor(place.placeType),
                               icon: Icons.bookmark,
+                            ),
+                          ),
+                        ),
+                      ),
+                      ...visibleSharedPlaces.map(
+                        (sharedPlace) => Marker(
+                          point: sharedPlace.place.point,
+                          width: 88,
+                          height: 88,
+                          child: GestureDetector(
+                            onTap: () => _showSharedPlaceDetails(sharedPlace),
+                            child: _MapMarker(
+                              color: _placeTypeColor(
+                                sharedPlace.place.placeType,
+                              ).withValues(alpha: 0.72),
+                              icon: Icons.public,
                             ),
                           ),
                         ),
@@ -1378,6 +1696,21 @@ class _MapScreenState extends State<MapScreen> {
                                     : 'Start sensors',
                               ),
                             ),
+                            FilledButton.tonalIcon(
+                              onPressed: _isMqttConnecting
+                                  ? null
+                                  : _toggleSharedMap,
+                              icon: Icon(
+                                _isMqttConnected
+                                    ? Icons.cloud_done_outlined
+                                    : Icons.cloud_outlined,
+                              ),
+                              label: Text(
+                                _isMqttConnected
+                                    ? 'Shared online'
+                                    : 'Shared map',
+                              ),
+                            ),
                           ],
                         ),
                         if (location != null) ...[
@@ -1419,6 +1752,28 @@ class _MapScreenState extends State<MapScreen> {
                             noiseDb: _currentNoiseDb,
                             lightLux: _currentLightLux,
                           ),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _sharedMapMessage,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ),
+                            FilterChip(
+                              label: Text('Shared (${_sharedPlaces.length})'),
+                              selected: _showSharedPlaces,
+                              onSelected: (value) {
+                                setState(() {
+                                  _showSharedPlaces = value;
+                                });
+                              },
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -1511,12 +1866,16 @@ class _SavedPlacesSheet extends StatelessWidget {
   const _SavedPlacesSheet({
     required this.places,
     required this.currentLocation,
+    required this.isSharedMapConnected,
+    required this.onUploadPlace,
     required this.onUpdatePlace,
     required this.onDeletePlace,
   });
 
   final List<SavedPlaceLog> places;
   final LatLng? currentLocation;
+  final bool isSharedMapConnected;
+  final ValueChanged<SavedPlaceLog> onUploadPlace;
   final void Function(SavedPlaceLog oldPlace, SavedPlaceLog updatedPlace)
   onUpdatePlace;
   final ValueChanged<SavedPlaceLog> onDeletePlace;
@@ -1655,6 +2014,17 @@ class _SavedPlacesSheet extends StatelessWidget {
                                     trailing: Wrap(
                                       spacing: 2,
                                       children: [
+                                        IconButton(
+                                          tooltip: isSharedMapConnected
+                                              ? 'Upload'
+                                              : 'Connect shared map first',
+                                          onPressed: isSharedMapConnected
+                                              ? () => onUploadPlace(place)
+                                              : null,
+                                          icon: const Icon(
+                                            Icons.cloud_upload_outlined,
+                                          ),
+                                        ),
                                         IconButton(
                                           tooltip: 'Edit',
                                           onPressed: () async {
@@ -2234,6 +2604,36 @@ String _formatTime(DateTime value) {
   return '$hour:$minute:$second';
 }
 
+bool get _hasMqttConfig {
+  return _mqttHost != 'your-mqtt-host.example.com' &&
+      _mqttUser != 'your-username' &&
+      _mqttPass != 'your-password';
+}
+
+String _sharedPlaceId(SavedPlaceLog place) {
+  final rawId = [
+    place.name,
+    place.point.latitude.toStringAsFixed(5),
+    place.point.longitude.toStringAsFixed(5),
+    place.recordedAt.millisecondsSinceEpoch,
+  ].join('_');
+
+  return rawId
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'_+'), '_')
+      .replaceAll(RegExp(r'^_|_$'), '');
+}
+
+String _sharedPlaceIdFromJson(Map<String, Object?> json) {
+  return [
+    json['name'] ?? 'shared-place',
+    json['latitude'] ?? 'unknown-lat',
+    json['longitude'] ?? 'unknown-lng',
+    json['recordedAt'] ?? DateTime.now().toIso8601String(),
+  ].join('_').toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+}
+
 List<SavedPlaceLog> _filterPlacesByType(
   List<SavedPlaceLog> places,
   String placeType,
@@ -2243,6 +2643,19 @@ List<SavedPlaceLog> _filterPlacesByType(
   }
 
   return places.where((place) => place.placeType == placeType).toList();
+}
+
+List<SharedPlaceLog> _filterSharedPlacesByType(
+  List<SharedPlaceLog> places,
+  String placeType,
+) {
+  if (placeType == 'All') {
+    return places;
+  }
+
+  return places
+      .where((sharedPlace) => sharedPlace.place.placeType == placeType)
+      .toList();
 }
 
 List<SavedPlaceLog> _searchPlaces(List<SavedPlaceLog> places, String query) {
