@@ -379,7 +379,7 @@ class _AppShellState extends State<AppShell> {
           NavigationDestination(
             icon: Icon(Icons.history_outlined),
             selectedIcon: Icon(Icons.history),
-            label: 'History',
+            label: 'Favorites',
           ),
         ],
         onDestinationSelected: (index) {
@@ -541,7 +541,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Clear all places?'),
         content: const Text(
-          'This removes every saved place from local storage. This cannot be undone.',
+          'This removes every local favorite from storage. This cannot be undone.',
         ),
         actions: [
           TextButton(
@@ -579,14 +579,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
         padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
         children: [
           Text(
-            'History',
+            'Favorites',
             style: theme.textTheme.displaySmall?.copyWith(
               fontWeight: FontWeight.w700,
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            'Review all places saved in this session.',
+            'Review places you saved locally from the shared map.',
             style: theme.textTheme.titleMedium?.copyWith(color: Colors.white70),
           ),
           const SizedBox(height: 16),
@@ -652,7 +652,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 border: Border.all(color: Colors.white12),
               ),
               child: Text(
-                'No saved places yet. Use the map to save your current location.',
+                'No local favorites yet. Open a shared place and save it locally.',
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: Colors.white70,
                 ),
@@ -668,7 +668,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ),
               child: Text(
                 _searchQuery.trim().isEmpty
-                    ? 'No $_selectedPlaceType places saved yet.'
+                    ? 'No $_selectedPlaceType favorites saved yet.'
                     : 'No places match this search.',
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: Colors.white70,
@@ -1153,13 +1153,13 @@ class _MapScreenState extends State<MapScreen> {
       return;
     }
 
-    final nearbyPlace = _nearestPlaceWithin(
+    final nearbyPlace = _nearestSharedPlaceWithin(
       location,
       _nearbyPlaceThresholdMeters,
     );
     if (nearbyPlace != null) {
       final shouldSaveNewPlace = await _confirmNearbyPlaceSave(
-        nearbyPlace.place,
+        nearbyPlace.group,
         nearbyPlace.distanceMeters,
       );
       if (!shouldSaveNewPlace) {
@@ -1181,26 +1181,32 @@ class _MapScreenState extends State<MapScreen> {
       return;
     }
 
-    widget.onSavePlace(place);
+    final uploaded = await _publishSharedPlace(place);
+    if (!mounted) {
+      return;
+    }
+
     setState(() {
-      _statusMessage = '${place.name} saved.';
+      _statusMessage = uploaded
+          ? '${place.name} uploaded to shared map.'
+          : 'Could not upload ${place.name}. Connect shared map first.';
     });
   }
 
-  ({SavedPlaceLog place, double distanceMeters})? _nearestPlaceWithin(
+  ({SharedPlaceGroup group, double distanceMeters})? _nearestSharedPlaceWithin(
     LatLng point,
     double thresholdMeters,
   ) {
-    ({SavedPlaceLog place, double distanceMeters})? nearestPlace;
+    ({SharedPlaceGroup group, double distanceMeters})? nearestPlace;
 
-    for (final place in widget.savedPlaces) {
-      final distanceMeters = _distance(point, place.point);
+    for (final group in _sharedPlaceGroups) {
+      final distanceMeters = _distance(point, group.place.point);
       if (distanceMeters > thresholdMeters) {
         continue;
       }
       if (nearestPlace == null ||
           distanceMeters < nearestPlace.distanceMeters) {
-        nearestPlace = (place: place, distanceMeters: distanceMeters);
+        nearestPlace = (group: group, distanceMeters: distanceMeters);
       }
     }
 
@@ -1208,7 +1214,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<bool> _confirmNearbyPlaceSave(
-    SavedPlaceLog nearbyPlace,
+    SharedPlaceGroup nearbyPlace,
     double distanceMeters,
   ) async {
     final action = await showDialog<String>(
@@ -1216,7 +1222,7 @@ class _MapScreenState extends State<MapScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Nearby place already saved'),
         content: Text(
-          '${nearbyPlace.name} is about ${distanceMeters.round()} m away. '
+          '${nearbyPlace.place.name} is about ${distanceMeters.round()} m away. '
           'You can view it instead of creating a duplicate record.',
         ),
         actions: [
@@ -1238,8 +1244,8 @@ class _MapScreenState extends State<MapScreen> {
     );
 
     if (action == 'view') {
-      _focusPlace(nearbyPlace);
-      await _showPlaceDetails(nearbyPlace);
+      _mapController.move(nearbyPlace.place.point, 17);
+      await _showSharedPlaceDetails(nearbyPlace);
       return false;
     }
 
@@ -1534,14 +1540,14 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
 
-  Future<void> _publishSharedPlace(SavedPlaceLog place) async {
+  Future<bool> _publishSharedPlace(SavedPlaceLog place) async {
     if (!_isMqttConnected || _mqttClient == null) {
       await _connectSharedMap();
     }
 
     final client = _mqttClient;
     if (!_isMqttConnected || client == null) {
-      return;
+      return false;
     }
 
     final sharedPlace = SharedPlaceLog(
@@ -1562,11 +1568,13 @@ class _MapScreenState extends State<MapScreen> {
     _upsertSharedPlace(sharedPlace);
 
     if (!mounted) {
-      return;
+      return true;
     }
     setState(() {
       _sharedMapMessage = '${place.name} uploaded to shared map.';
     });
+
+    return true;
   }
 
   Future<void> _toggleSensors() async {
@@ -1991,7 +1999,7 @@ class _MapControlSheet extends StatelessWidget {
                 FilledButton.tonalIcon(
                   onPressed: onShowSavedPlaces,
                   icon: const Icon(Icons.list_alt),
-                  label: Text('Saved ($savedCount)'),
+                  label: Text('Favorites ($savedCount)'),
                 ),
               ],
             ),
@@ -2021,8 +2029,8 @@ class _MapControlSheet extends StatelessWidget {
                 ),
                 FilledButton.tonalIcon(
                   onPressed: onSavePlace,
-                  icon: const Icon(Icons.bookmark_add),
-                  label: const Text('Save'),
+                  icon: const Icon(Icons.add_location_alt_outlined),
+                  label: const Text('Create'),
                 ),
                 FilledButton.tonalIcon(
                   onPressed: onToggleSensors,
@@ -2051,8 +2059,8 @@ class _MapControlSheet extends StatelessWidget {
             const SizedBox(height: 14),
             Text(
               selectedPlaceType == 'All'
-                  ? 'Showing $savedCount saved places'
-                  : 'Showing $visibleSavedCount/$savedCount $selectedPlaceType places',
+                  ? 'Showing $savedCount local favorites'
+                  : 'Showing $visibleSavedCount/$savedCount $selectedPlaceType favorites',
               style: theme.textTheme.labelMedium?.copyWith(
                 color: Colors.white70,
               ),
@@ -2188,7 +2196,7 @@ class _SavedPlacesSheet extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            'Saved places',
+                            'Local favorites',
                             style: theme.textTheme.titleLarge?.copyWith(
                               fontWeight: FontWeight.w700,
                             ),
@@ -2217,7 +2225,7 @@ class _SavedPlacesSheet extends StatelessWidget {
                     DropdownButtonFormField<String>(
                       initialValue: selectedSort,
                       decoration: InputDecoration(
-                        labelText: 'Sort saved places',
+                        labelText: 'Sort local favorites',
                         filled: true,
                         fillColor: const Color(0xFF1A2127),
                         border: OutlineInputBorder(
@@ -2254,7 +2262,7 @@ class _SavedPlacesSheet extends StatelessWidget {
                       child: places.isEmpty
                           ? Center(
                               child: Text(
-                                'No places saved yet.',
+                                'No local favorites yet.',
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: Colors.white70,
                                 ),
@@ -2263,7 +2271,7 @@ class _SavedPlacesSheet extends StatelessWidget {
                           : filteredPlaces.isEmpty
                           ? Center(
                               child: Text(
-                                'No $selectedPlaceType places saved yet.',
+                                'No $selectedPlaceType favorites saved yet.',
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: Colors.white70,
                                 ),
@@ -2597,7 +2605,7 @@ class _SavePlaceDialogState extends State<_SavePlaceDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(
-        widget.existingPlace == null ? 'Save this place' : 'Edit place',
+        widget.existingPlace == null ? 'Create shared place' : 'Edit place',
       ),
       content: SingleChildScrollView(
         child: Column(
