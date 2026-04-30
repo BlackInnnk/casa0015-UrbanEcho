@@ -687,6 +687,8 @@ class HomeScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 const _SectionLabel('Browse by activity'),
+                const SizedBox(height: 10),
+                _HomeAllPlacesCta(onTap: () => onBrowseActivity('All')),
               ],
             ),
           ),
@@ -1473,7 +1475,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _saveDraftPlace() async {
-    final point = _draftPlacePoint ?? _mapController.camera.center;
+    final point = _mapController.camera.center;
 
     final uploaded = await _createPlaceAtPoint(point);
     if (!mounted || uploaded != true) {
@@ -1616,6 +1618,8 @@ class _MapScreenState extends State<MapScreen> {
         savedPlaces: widget.savedPlaces,
         currentLocation: _currentLocation,
         onSaveLocally: _saveSharedPlaceLocally,
+        onDeleteSavedPlace: widget.onDeletePlace,
+        onDeleteSharedGroup: _confirmDeleteSharedPlaceGroup,
         initialPlaceType: initialPlaceType,
       ),
     );
@@ -1645,9 +1649,11 @@ class _MapScreenState extends State<MapScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
-          final isSaved = widget.savedPlaces.any(
-            (savedPlace) => _isSameSavedPlace(savedPlace, group.place),
+          final savedPlace = _matchingSavedPlace(
+            widget.savedPlaces,
+            group.place,
           );
+          final isSaved = savedPlace != null;
 
           return AlertDialog(
             title: const Text('Place details'),
@@ -1691,7 +1697,9 @@ class _MapScreenState extends State<MapScreen> {
                   foregroundColor: _cream,
                 ),
                 onPressed: () {
-                  if (isSaved) {
+                  if (savedPlace != null) {
+                    widget.onDeletePlace(savedPlace);
+                    setDialogState(() {});
                     return;
                   }
                   _saveSharedPlaceLocally(group.localCopy);
@@ -1715,6 +1723,45 @@ class _MapScreenState extends State<MapScreen> {
 
   List<SharedPlaceGroup> get _sharedPlaceGroups {
     return _groupSharedPlaces(_sharedPlaces);
+  }
+
+  Future<void> _confirmDeleteSharedPlaceGroup(SharedPlaceGroup group) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete shared place?'),
+        content: Text(
+          'This removes "${group.place.name}" from All places for everyone. '
+          'Use this only as a prototype management action.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: _deepBrown),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldDelete != true) {
+      return;
+    }
+
+    final deleted = await _deleteSharedPlaceGroup(group);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _statusMessage = deleted
+          ? '${group.place.name} removed from All places.'
+          : 'Could not delete ${group.place.name}. Check connection.';
+    });
   }
 
   void _saveSharedPlaceLocally(SharedPlaceLog sharedPlace) {
@@ -1838,6 +1885,17 @@ class _MapScreenState extends State<MapScreen> {
         final raw = MqttPublishPayload.bytesToStringAsString(
           payload.payload.message,
         );
+        if (raw.trim().isEmpty) {
+          final deletedId = _sharedPlaceIdFromTopic(
+            message.topic,
+            _mqttSettings.topicPrefix,
+          );
+          if (deletedId != null) {
+            _removeSharedPlacesByIds({deletedId});
+          }
+          continue;
+        }
+
         final decoded = jsonDecode(raw);
         if (decoded is! Map) {
           continue;
@@ -1867,6 +1925,16 @@ class _MapScreenState extends State<MapScreen> {
       } else {
         _sharedPlaces[index] = sharedPlace;
       }
+    });
+  }
+
+  void _removeSharedPlacesByIds(Set<String> ids) {
+    if (!mounted || ids.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _sharedPlaces.removeWhere((place) => ids.contains(place.id));
     });
   }
 
@@ -1904,6 +1972,31 @@ class _MapScreenState extends State<MapScreen> {
       _statusMessage = '${place.name} uploaded.';
     });
 
+    return true;
+  }
+
+  Future<bool> _deleteSharedPlaceGroup(SharedPlaceGroup group) async {
+    if (!_isMqttConnected || _mqttClient == null) {
+      await _connectSharedMap();
+    }
+
+    final client = _mqttClient;
+    if (!_isMqttConnected || client == null) {
+      return false;
+    }
+
+    final emptyPayload = MqttClientPayloadBuilder().payload!;
+    final ids = group.places.map((place) => place.id).toSet();
+    for (final id in ids) {
+      client.publishMessage(
+        '${_mqttSettings.topicPrefix}/$id',
+        MqttQos.atLeastOnce,
+        emptyPayload,
+        retain: true,
+      );
+    }
+
+    _removeSharedPlacesByIds(ids);
     return true;
   }
 
@@ -2117,8 +2210,8 @@ class _MapScreenState extends State<MapScreen> {
                     markers: [
                       Marker(
                         point: _ucl,
-                        width: 90,
-                        height: 90,
+                        width: 52,
+                        height: 52,
                         alignment: Alignment.bottomCenter,
                         rotate: true,
                         child: const _MapMarker(
@@ -2129,8 +2222,8 @@ class _MapScreenState extends State<MapScreen> {
                       ...visibleSavedPlaces.map(
                         (place) => Marker(
                           point: place.point,
-                          width: 88,
-                          height: 88,
+                          width: 52,
+                          height: 52,
                           alignment: Alignment.bottomCenter,
                           rotate: true,
                           child: GestureDetector(
@@ -2145,8 +2238,8 @@ class _MapScreenState extends State<MapScreen> {
                       ...visibleSharedPlaces.map(
                         (sharedGroup) => Marker(
                           point: sharedGroup.place.point,
-                          width: 88,
-                          height: 88,
+                          width: 52,
+                          height: 52,
                           alignment: Alignment.bottomCenter,
                           rotate: true,
                           child: GestureDetector(
@@ -2986,6 +3079,8 @@ class _SharedPlacesSheet extends StatelessWidget {
     required this.savedPlaces,
     required this.currentLocation,
     required this.onSaveLocally,
+    required this.onDeleteSavedPlace,
+    required this.onDeleteSharedGroup,
     required this.initialPlaceType,
   });
 
@@ -2993,6 +3088,8 @@ class _SharedPlacesSheet extends StatelessWidget {
   final List<SavedPlaceLog> savedPlaces;
   final LatLng? currentLocation;
   final ValueChanged<SharedPlaceLog> onSaveLocally;
+  final ValueChanged<SavedPlaceLog> onDeleteSavedPlace;
+  final Future<void> Function(SharedPlaceGroup group) onDeleteSharedGroup;
   final String initialPlaceType;
 
   @override
@@ -3119,12 +3216,11 @@ class _SharedPlacesSheet extends StatelessWidget {
                                   const SizedBox(height: 10),
                               itemBuilder: (context, index) {
                                 final group = filteredGroups[index];
-                                final isSaved = savedPlaces.any(
-                                  (savedPlace) => _isSameSavedPlace(
-                                    savedPlace,
-                                    group.place,
-                                  ),
+                                final savedPlace = _matchingSavedPlace(
+                                  savedPlaces,
+                                  group.place,
                                 );
+                                final isSaved = savedPlace != null;
                                 return InkWell(
                                   borderRadius: BorderRadius.circular(14),
                                   onTap: () => Navigator.of(context).pop(group),
@@ -3133,28 +3229,51 @@ class _SharedPlacesSheet extends StatelessWidget {
                                     currentLocation: currentLocation,
                                     averageRating: group.averageRating,
                                     ratingCount: group.ratingCount,
-                                    trailing: IconButton(
-                                      tooltip: isSaved ? 'Saved' : 'Save',
-                                      style: IconButton.styleFrom(
-                                        backgroundColor: isSaved
-                                            ? _deepBrown
-                                            : _paper,
-                                        foregroundColor: isSaved
-                                            ? _cream
-                                            : _brown,
-                                      ),
-                                      onPressed: () {
-                                        if (isSaved) {
-                                          return;
-                                        }
-                                        onSaveLocally(group.localCopy);
-                                        setSheetState(() {});
-                                      },
-                                      icon: Icon(
-                                        isSaved
-                                            ? Icons.bookmark
-                                            : Icons.bookmark_add_outlined,
-                                      ),
+                                    trailing: Wrap(
+                                      spacing: 2,
+                                      children: [
+                                        IconButton(
+                                          tooltip: isSaved
+                                              ? 'Remove favorite'
+                                              : 'Save',
+                                          style: IconButton.styleFrom(
+                                            backgroundColor: isSaved
+                                                ? _deepBrown
+                                                : _paper,
+                                            foregroundColor: isSaved
+                                                ? _cream
+                                                : _brown,
+                                          ),
+                                          onPressed: () {
+                                            if (savedPlace != null) {
+                                              onDeleteSavedPlace(savedPlace);
+                                              setSheetState(() {});
+                                              return;
+                                            }
+                                            onSaveLocally(group.localCopy);
+                                            setSheetState(() {});
+                                          },
+                                          icon: Icon(
+                                            isSaved
+                                                ? Icons.bookmark
+                                                : Icons.bookmark_add_outlined,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          tooltip: 'Delete from All places',
+                                          style: IconButton.styleFrom(
+                                            backgroundColor: _paper,
+                                            foregroundColor: _deepBrown,
+                                          ),
+                                          onPressed: () async {
+                                            await onDeleteSharedGroup(group);
+                                            setSheetState(() {});
+                                          },
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 );
@@ -4137,6 +4256,68 @@ class _UseCaseChip extends StatelessWidget {
   }
 }
 
+class _HomeAllPlacesCta extends StatelessWidget {
+  const _HomeAllPlacesCta({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: _paper,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _paperLine),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: _deepBrown,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Icon(Icons.public, color: _cream, size: 17),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'All places',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Browse every shared city note',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: _mutedInk,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.arrow_forward, color: _brown, size: 18),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HomeMapCta extends StatelessWidget {
   const _HomeMapCta({required this.onOpenMap});
 
@@ -4416,6 +4597,19 @@ String _sharedPlaceIdFromJson(Map<String, Object?> json) {
   ].join('_').toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
 }
 
+String? _sharedPlaceIdFromTopic(String topic, String topicPrefix) {
+  final normalizedPrefix = topicPrefix.endsWith('/')
+      ? topicPrefix.substring(0, topicPrefix.length - 1)
+      : topicPrefix;
+  final prefixWithSlash = '$normalizedPrefix/';
+  if (!topic.startsWith(prefixWithSlash)) {
+    return null;
+  }
+
+  final id = topic.substring(prefixWithSlash.length).trim();
+  return id.isEmpty ? null : id;
+}
+
 List<SavedPlaceLog> _filterPlacesByType(
   List<SavedPlaceLog> places,
   String placeType,
@@ -4460,6 +4654,18 @@ String _sharedPlaceGroupKey(SavedPlaceLog place) {
 
 bool _isSameSavedPlace(SavedPlaceLog first, SavedPlaceLog second) {
   return _sharedPlaceGroupKey(first) == _sharedPlaceGroupKey(second);
+}
+
+SavedPlaceLog? _matchingSavedPlace(
+  List<SavedPlaceLog> savedPlaces,
+  SavedPlaceLog place,
+) {
+  for (final savedPlace in savedPlaces) {
+    if (_isSameSavedPlace(savedPlace, place)) {
+      return savedPlace;
+    }
+  }
+  return null;
 }
 
 String _normalizedPlaceName(String name) {
