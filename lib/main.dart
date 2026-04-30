@@ -1725,7 +1725,7 @@ class _MapScreenState extends State<MapScreen> {
     return _groupSharedPlaces(_sharedPlaces);
   }
 
-  Future<void> _confirmDeleteSharedPlaceGroup(SharedPlaceGroup group) async {
+  Future<bool> _confirmDeleteSharedPlaceGroup(SharedPlaceGroup group) async {
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1749,12 +1749,12 @@ class _MapScreenState extends State<MapScreen> {
     );
 
     if (shouldDelete != true) {
-      return;
+      return false;
     }
 
     final deleted = await _deleteSharedPlaceGroup(group);
     if (!mounted) {
-      return;
+      return false;
     }
 
     setState(() {
@@ -1762,6 +1762,7 @@ class _MapScreenState extends State<MapScreen> {
           ? '${group.place.name} removed from All places.'
           : 'Could not delete ${group.place.name}. Check connection.';
     });
+    return deleted;
   }
 
   void _saveSharedPlaceLocally(SharedPlaceLog sharedPlace) {
@@ -3089,7 +3090,7 @@ class _SharedPlacesSheet extends StatelessWidget {
   final LatLng? currentLocation;
   final ValueChanged<SharedPlaceLog> onSaveLocally;
   final ValueChanged<SavedPlaceLog> onDeleteSavedPlace;
-  final Future<void> Function(SharedPlaceGroup group) onDeleteSharedGroup;
+  final Future<bool> Function(SharedPlaceGroup group) onDeleteSharedGroup;
   final String initialPlaceType;
 
   @override
@@ -3097,6 +3098,7 @@ class _SharedPlacesSheet extends StatelessWidget {
     final theme = Theme.of(context);
     String selectedPlaceType = initialPlaceType;
     String selectedSort = currentLocation == null ? 'Newest' : 'Nearest';
+    final visibleGroups = List<SharedPlaceGroup>.of(groups);
 
     return SafeArea(
       child: StatefulBuilder(
@@ -3108,7 +3110,10 @@ class _SharedPlacesSheet extends StatelessWidget {
             maxChildSize: 0.9,
             builder: (context, scrollController) {
               final filteredGroups = _sortSharedPlaceGroupsForMapSheet(
-                _filterSharedPlaceGroupsByType(groups, selectedPlaceType),
+                _filterSharedPlaceGroupsByType(
+                  visibleGroups,
+                  selectedPlaceType,
+                ),
                 selectedSort,
                 currentLocation,
               );
@@ -3138,8 +3143,8 @@ class _SharedPlacesSheet extends StatelessWidget {
                         ),
                         Text(
                           selectedPlaceType == 'All'
-                              ? '${groups.length}'
-                              : '${filteredGroups.length}/${groups.length}',
+                              ? '${visibleGroups.length}'
+                              : '${filteredGroups.length}/${visibleGroups.length}',
                           style: theme.textTheme.titleMedium?.copyWith(
                             color: _terracotta,
                           ),
@@ -3191,7 +3196,7 @@ class _SharedPlacesSheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 14),
                     Expanded(
-                      child: groups.isEmpty
+                      child: visibleGroups.isEmpty
                           ? Center(
                               child: Text(
                                 'No places loaded yet.',
@@ -3266,8 +3271,31 @@ class _SharedPlacesSheet extends StatelessWidget {
                                             foregroundColor: _deepBrown,
                                           ),
                                           onPressed: () async {
-                                            await onDeleteSharedGroup(group);
-                                            setSheetState(() {});
+                                            final deleted =
+                                                await onDeleteSharedGroup(
+                                                  group,
+                                                );
+                                            if (!deleted) {
+                                              return;
+                                            }
+
+                                            setSheetState(() {
+                                              final deletedIds = group.places
+                                                  .map(
+                                                    (sharedPlace) =>
+                                                        sharedPlace.id,
+                                                  )
+                                                  .toSet();
+                                              visibleGroups.removeWhere(
+                                                (candidate) =>
+                                                    candidate.places.any(
+                                                      (sharedPlace) =>
+                                                          deletedIds.contains(
+                                                            sharedPlace.id,
+                                                          ),
+                                                    ),
+                                              );
+                                            });
                                           },
                                           icon: const Icon(
                                             Icons.delete_outline,
