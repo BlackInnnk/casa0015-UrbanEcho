@@ -1042,6 +1042,7 @@ class _MapScreenState extends State<MapScreen> {
   static const LatLng _ucl = LatLng(51.5246, -0.1340);
   static const double _nearbyPlaceThresholdMeters = 25;
 
+  final GlobalKey _mapAreaKey = GlobalKey();
   final MapController _mapController = MapController();
   final Light _light = Light();
   final NoiseMeter _noiseMeter = NoiseMeter();
@@ -1072,6 +1073,7 @@ class _MapScreenState extends State<MapScreen> {
   bool _isMqttConnecting = false;
   bool _isMqttConnected = false;
   bool _showSharedPlaces = true;
+  LatLng? _draftPlacePoint;
   String _selectedMapPlaceType = 'All';
   String _statusMessage = 'Requesting location...';
   String _sensorMessage = 'Sensors are off.';
@@ -1228,14 +1230,69 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  Future<void> _saveCurrentPlace() async {
-    final location = _currentLocation;
-    if (location == null) {
+  void _startDraftPlace() {
+    final startPoint =
+        _draftPlacePoint ?? _currentLocation ?? _mapController.camera.center;
+    final zoom = _mapController.camera.zoom < 16
+        ? 16.0
+        : _mapController.camera.zoom;
+
+    setState(() {
+      _draftPlacePoint = startPoint;
+      _statusMessage = 'Drag the marker or tap the map, then save here.';
+    });
+    _mapController.move(startPoint, zoom);
+  }
+
+  void _cancelDraftPlace() {
+    setState(() {
+      _draftPlacePoint = null;
+      _statusMessage = 'Place creation cancelled.';
+    });
+  }
+
+  void _setDraftPlacePoint(LatLng point) {
+    setState(() {
+      _draftPlacePoint = point;
+      _statusMessage = 'Draft place moved. Save here when ready.';
+    });
+  }
+
+  void _moveDraftPlaceToGlobalPosition(Offset globalPosition) {
+    final renderObject = _mapAreaKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox) {
       return;
     }
 
+    final localPosition = renderObject.globalToLocal(globalPosition);
+    final size = renderObject.size;
+    final clampedPosition = Offset(
+      localPosition.dx.clamp(0.0, size.width).toDouble(),
+      localPosition.dy.clamp(0.0, size.height).toDouble(),
+    );
+    final point = _mapController.camera.screenOffsetToLatLng(clampedPosition);
+    _setDraftPlacePoint(point);
+  }
+
+  Future<void> _saveDraftPlace() async {
+    final point = _draftPlacePoint;
+    if (point == null) {
+      return;
+    }
+
+    final uploaded = await _createPlaceAtPoint(point);
+    if (!mounted || uploaded != true) {
+      return;
+    }
+
+    setState(() {
+      _draftPlacePoint = null;
+    });
+  }
+
+  Future<bool?> _createPlaceAtPoint(LatLng point) async {
     final nearbyPlace = _nearestSharedPlaceWithin(
-      location,
+      point,
       _nearbyPlaceThresholdMeters,
     );
     if (nearbyPlace != null) {
@@ -1244,14 +1301,14 @@ class _MapScreenState extends State<MapScreen> {
         nearbyPlace.distanceMeters,
       );
       if (!shouldSaveNewPlace) {
-        return;
+        return null;
       }
     }
 
     final place = await showDialog<SavedPlaceLog>(
       context: context,
       builder: (context) => _SavePlaceDialog(
-        point: location,
+        point: point,
         noiseDb: _averageCurrentNoiseDb,
         lightLux: _averageCurrentLightLux,
         sensorSummary: _sensorSampleSummary,
@@ -1259,12 +1316,12 @@ class _MapScreenState extends State<MapScreen> {
     );
 
     if (place == null) {
-      return;
+      return null;
     }
 
     final uploaded = await _publishSharedPlace(place);
     if (!mounted) {
-      return;
+      return uploaded;
     }
 
     setState(() {
@@ -1272,6 +1329,7 @@ class _MapScreenState extends State<MapScreen> {
           ? '${place.name} uploaded to shared map.'
           : 'Could not upload ${place.name}. Connect shared map first.';
     });
+    return uploaded;
   }
 
   ({SharedPlaceGroup group, double distanceMeters})? _nearestSharedPlaceWithin(
@@ -1818,14 +1876,21 @@ class _MapScreenState extends State<MapScreen> {
       body: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         child: ClipRRect(
+          key: _mapAreaKey,
           borderRadius: BorderRadius.circular(24),
           child: Stack(
             children: [
               FlutterMap(
                 mapController: _mapController,
-                options: const MapOptions(
+                options: MapOptions(
                   initialCenter: _ucl,
                   initialZoom: 15.2,
+                  onTap: (_, point) {
+                    if (_draftPlacePoint == null) {
+                      return;
+                    }
+                    _setDraftPlacePoint(point);
+                  },
                 ),
                 children: [
                   TileLayer(
@@ -1884,10 +1949,25 @@ class _MapScreenState extends State<MapScreen> {
                             icon: Icons.my_location,
                           ),
                         ),
+                      if (_draftPlacePoint != null)
+                        Marker(
+                          point: _draftPlacePoint!,
+                          width: 104,
+                          height: 104,
+                          child: _DraggableDraftMarker(
+                            onDrag: _moveDraftPlaceToGlobalPosition,
+                          ),
+                        ),
                     ],
                   ),
                 ],
               ),
+              if (_draftPlacePoint != null)
+                const Positioned(
+                  left: 12,
+                  top: 12,
+                  child: _PlacementHintPill(),
+                ),
               Positioned(
                 right: 12,
                 top: 12,
@@ -1906,6 +1986,7 @@ class _MapScreenState extends State<MapScreen> {
                 builder: (context, scrollController) => _MapControlSheet(
                   scrollController: scrollController,
                   location: location,
+                  draftPlacePoint: _draftPlacePoint,
                   isLoading: _isLoading,
                   isSensorScanning: _isSensorScanning,
                   showSharedPlaces: _showSharedPlaces,
@@ -1921,7 +2002,11 @@ class _MapScreenState extends State<MapScreen> {
                   savedCount: widget.savedPlaces.length,
                   sharedCount: _sharedPlaces.length,
                   onLocate: _isLoading ? null : _loadCurrentLocation,
-                  onSavePlace: location == null ? null : _saveCurrentPlace,
+                  onStartDraftPlace: _startDraftPlace,
+                  onSaveDraftPlace: _draftPlacePoint == null
+                      ? null
+                      : _saveDraftPlace,
+                  onCancelDraftPlace: _cancelDraftPlace,
                   onToggleSensors: _toggleSensors,
                   onShowSavedPlaces: _showSavedPlaces,
                   onShowSharedPlaces: _sharedPlaces.isEmpty
@@ -2009,10 +2094,63 @@ class _MqttStatusPill extends StatelessWidget {
   }
 }
 
+class _PlacementHintPill extends StatelessWidget {
+  const _PlacementHintPill();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xF2111417),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: const Color(0xFFFFC36A).withValues(alpha: 0.5),
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Text(
+          '📍 Drag marker or tap map',
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DraggableDraftMarker extends StatelessWidget {
+  const _DraggableDraftMarker({required this.onDrag});
+
+  final ValueChanged<Offset> onDrag;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onPanStart: (details) => onDrag(details.globalPosition),
+      onPanUpdate: (details) => onDrag(details.globalPosition),
+      child: const _MapMarker(color: Color(0xFFFFC36A), icon: Icons.open_with),
+    );
+  }
+}
+
 class _MapControlSheet extends StatelessWidget {
   const _MapControlSheet({
     required this.scrollController,
     required this.location,
+    required this.draftPlacePoint,
     required this.isLoading,
     required this.isSensorScanning,
     required this.showSharedPlaces,
@@ -2028,7 +2166,9 @@ class _MapControlSheet extends StatelessWidget {
     required this.savedCount,
     required this.sharedCount,
     required this.onLocate,
-    required this.onSavePlace,
+    required this.onStartDraftPlace,
+    required this.onSaveDraftPlace,
+    required this.onCancelDraftPlace,
     required this.onToggleSensors,
     required this.onShowSavedPlaces,
     required this.onShowSharedPlaces,
@@ -2038,6 +2178,7 @@ class _MapControlSheet extends StatelessWidget {
 
   final ScrollController scrollController;
   final LatLng? location;
+  final LatLng? draftPlacePoint;
   final bool isLoading;
   final bool isSensorScanning;
   final bool showSharedPlaces;
@@ -2053,7 +2194,9 @@ class _MapControlSheet extends StatelessWidget {
   final int savedCount;
   final int sharedCount;
   final VoidCallback? onLocate;
-  final VoidCallback? onSavePlace;
+  final VoidCallback onStartDraftPlace;
+  final VoidCallback? onSaveDraftPlace;
+  final VoidCallback onCancelDraftPlace;
   final VoidCallback onToggleSensors;
   final VoidCallback onShowSavedPlaces;
   final VoidCallback? onShowSharedPlaces;
@@ -2063,6 +2206,8 @@ class _MapControlSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isPlacingDraft = draftPlacePoint != null;
+    final activePoint = draftPlacePoint ?? location;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -2098,7 +2243,9 @@ class _MapControlSheet extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    location == null
+                    isPlacingDraft
+                        ? 'Place marker mode'
+                        : location == null
                         ? 'Waiting for location'
                         : 'UrbanEcho controls',
                     style: theme.textTheme.titleMedium?.copyWith(
@@ -2118,12 +2265,16 @@ class _MapControlSheet extends StatelessWidget {
               statusMessage,
               style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
             ),
-            if (location != null) ...[
+            if (activePoint != null) ...[
               const SizedBox(height: 6),
               Text(
-                'Lat ${location!.latitude.toStringAsFixed(5)} | Lng ${location!.longitude.toStringAsFixed(5)}',
+                '${isPlacingDraft ? 'Draft' : 'Current'} '
+                'Lat ${activePoint.latitude.toStringAsFixed(5)} | '
+                'Lng ${activePoint.longitude.toStringAsFixed(5)}',
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: const Color(0xFF7EE4C5),
+                  color: isPlacingDraft
+                      ? const Color(0xFFFFC36A)
+                      : const Color(0xFF7EE4C5),
                 ),
               ),
             ],
@@ -2137,11 +2288,23 @@ class _MapControlSheet extends StatelessWidget {
                   icon: const Icon(Icons.my_location),
                   label: Text(isLoading ? 'Locating...' : 'Locate'),
                 ),
-                FilledButton.tonalIcon(
-                  onPressed: onSavePlace,
-                  icon: const Icon(Icons.add_location_alt_outlined),
-                  label: const Text('Create'),
-                ),
+                if (isPlacingDraft) ...[
+                  FilledButton.icon(
+                    onPressed: onSaveDraftPlace,
+                    icon: const Icon(Icons.check),
+                    label: const Text('Save here'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: onCancelDraftPlace,
+                    icon: const Icon(Icons.close),
+                    label: const Text('Cancel'),
+                  ),
+                ] else
+                  FilledButton.tonalIcon(
+                    onPressed: onStartDraftPlace,
+                    icon: const Icon(Icons.add_location_alt_outlined),
+                    label: const Text('Create'),
+                  ),
                 FilledButton.tonalIcon(
                   onPressed: onToggleSensors,
                   icon: Icon(
