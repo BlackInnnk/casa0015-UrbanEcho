@@ -1075,7 +1075,6 @@ class _MapScreenState extends State<MapScreen> {
   String _selectedMapPlaceType = 'All';
   String _statusMessage = 'Requesting location...';
   String _sensorMessage = 'Sensors are off.';
-  String _sharedMapMessage = 'Shared map is offline.';
 
   @override
   void initState() {
@@ -1119,26 +1118,35 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _loadMqttSettings() async {
+    if (mounted) {
+      setState(() {
+        _isMqttConnecting = true;
+      });
+    }
+
     try {
       final raw = await rootBundle.loadString(_mqttConfigAssetPath);
       final decoded = jsonDecode(raw);
-      if (decoded is! Map) {
-        return;
+      if (decoded is Map && mounted) {
+        final settings = MqttSettings.fromJson(
+          Map<String, Object?>.from(decoded),
+        );
+        setState(() {
+          _mqttSettings = settings;
+        });
       }
-
-      final settings = MqttSettings.fromJson(
-        Map<String, Object?>.from(decoded),
-      );
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _mqttSettings = settings;
-      });
     } catch (_) {
       // The ignored local config is optional. Fall back to --dart-define values.
     }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isMqttConnecting = false;
+    });
+    await _connectSharedMap();
   }
 
   Future<void> _loadCurrentLocation() async {
@@ -1454,31 +1462,21 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
 
-  Future<void> _toggleSharedMap() async {
-    if (_isMqttConnected) {
-      await _disconnectSharedMap();
-      return;
-    }
-
-    await _connectSharedMap();
-  }
-
   Future<void> _connectSharedMap() async {
-    if (_isMqttConnecting) {
+    if (_isMqttConnecting || _isMqttConnected) {
       return;
     }
 
     if (!_mqttSettings.isConfigured) {
       setState(() {
-        _sharedMapMessage =
-            'MQTT config missing. Add local mqtt_config.json or --dart-define values.';
+        _isMqttConnected = false;
+        _isMqttConnecting = false;
       });
       return;
     }
 
     setState(() {
       _isMqttConnecting = true;
-      _sharedMapMessage = 'Connecting shared map...';
     });
 
     final client = MqttServerClient.withPort(
@@ -1495,7 +1493,7 @@ class _MapScreenState extends State<MapScreen> {
       }
       setState(() {
         _isMqttConnected = false;
-        _sharedMapMessage = 'Shared map disconnected.';
+        _isMqttConnecting = false;
       });
     };
     client.onConnected = () {
@@ -1504,7 +1502,7 @@ class _MapScreenState extends State<MapScreen> {
       }
       setState(() {
         _isMqttConnected = true;
-        _sharedMapMessage = 'Shared map connected.';
+        _isMqttConnecting = false;
       });
     };
     client.connectionMessage = MqttConnectMessage()
@@ -1531,7 +1529,6 @@ class _MapScreenState extends State<MapScreen> {
         _mqttClient = client;
         _isMqttConnected = true;
         _isMqttConnecting = false;
-        _sharedMapMessage = 'Shared map connected.';
       });
     } catch (_) {
       client.disconnect();
@@ -1542,26 +1539,8 @@ class _MapScreenState extends State<MapScreen> {
         _mqttClient = null;
         _isMqttConnected = false;
         _isMqttConnecting = false;
-        _sharedMapMessage = 'Unable to connect shared map.';
       });
     }
-  }
-
-  Future<void> _disconnectSharedMap() async {
-    await _mqttSubscription?.cancel();
-    _mqttSubscription = null;
-    _mqttClient?.disconnect();
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _mqttClient = null;
-      _isMqttConnected = false;
-      _isMqttConnecting = false;
-      _sharedMapMessage = 'Shared map is offline.';
-    });
   }
 
   void _handleSharedPlaceMessages(
@@ -1644,7 +1623,7 @@ class _MapScreenState extends State<MapScreen> {
       return true;
     }
     setState(() {
-      _sharedMapMessage = '${place.name} uploaded to shared map.';
+      _statusMessage = '${place.name} uploaded to shared map.';
     });
 
     return true;
@@ -1909,6 +1888,17 @@ class _MapScreenState extends State<MapScreen> {
                   ),
                 ],
               ),
+              Positioned(
+                right: 12,
+                top: 12,
+                child: _MqttStatusPill(
+                  isConnected: _isMqttConnected,
+                  isConnecting: _isMqttConnecting,
+                  onRetry: _isMqttConnected || _isMqttConnecting
+                      ? null
+                      : _connectSharedMap,
+                ),
+              ),
               DraggableScrollableSheet(
                 initialChildSize: 0.24,
                 minChildSize: 0.14,
@@ -1918,12 +1908,9 @@ class _MapScreenState extends State<MapScreen> {
                   location: location,
                   isLoading: _isLoading,
                   isSensorScanning: _isSensorScanning,
-                  isMqttConnecting: _isMqttConnecting,
-                  isMqttConnected: _isMqttConnected,
                   showSharedPlaces: _showSharedPlaces,
                   statusMessage: _statusMessage,
                   sensorMessage: _sensorMessage,
-                  sharedMapMessage: _sharedMapMessage,
                   currentNoiseDb: _currentNoiseDb,
                   currentLightLux: _currentLightLux,
                   averageNoiseDb: _averageCurrentNoiseDb,
@@ -1936,9 +1923,6 @@ class _MapScreenState extends State<MapScreen> {
                   onLocate: _isLoading ? null : _loadCurrentLocation,
                   onSavePlace: location == null ? null : _saveCurrentPlace,
                   onToggleSensors: _toggleSensors,
-                  onToggleSharedMap: _isMqttConnecting
-                      ? null
-                      : _toggleSharedMap,
                   onShowSavedPlaces: _showSavedPlaces,
                   onShowSharedPlaces: _sharedPlaces.isEmpty
                       ? null
@@ -1964,18 +1948,76 @@ class _MapScreenState extends State<MapScreen> {
   }
 }
 
+class _MqttStatusPill extends StatelessWidget {
+  const _MqttStatusPill({
+    required this.isConnected,
+    required this.isConnecting,
+    required this.onRetry,
+  });
+
+  final bool isConnected;
+  final bool isConnecting;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = isConnected
+        ? const Color(0xFF7EE4C5)
+        : isConnecting
+        ? const Color(0xFFFFC36A)
+        : const Color(0xFFFF8A7A);
+    final label = isConnected
+        ? '🟢 Online'
+        : isConnecting
+        ? '🟡 Connecting'
+        : '🔴 Failed';
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xF2111417),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (onRetry != null) ...[
+              const SizedBox(width: 8),
+              TextButton(onPressed: onRetry, child: const Text('Retry')),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _MapControlSheet extends StatelessWidget {
   const _MapControlSheet({
     required this.scrollController,
     required this.location,
     required this.isLoading,
     required this.isSensorScanning,
-    required this.isMqttConnecting,
-    required this.isMqttConnected,
     required this.showSharedPlaces,
     required this.statusMessage,
     required this.sensorMessage,
-    required this.sharedMapMessage,
     required this.currentNoiseDb,
     required this.currentLightLux,
     required this.averageNoiseDb,
@@ -1988,7 +2030,6 @@ class _MapControlSheet extends StatelessWidget {
     required this.onLocate,
     required this.onSavePlace,
     required this.onToggleSensors,
-    required this.onToggleSharedMap,
     required this.onShowSavedPlaces,
     required this.onShowSharedPlaces,
     required this.onToggleSharedPlaces,
@@ -1999,12 +2040,9 @@ class _MapControlSheet extends StatelessWidget {
   final LatLng? location;
   final bool isLoading;
   final bool isSensorScanning;
-  final bool isMqttConnecting;
-  final bool isMqttConnected;
   final bool showSharedPlaces;
   final String statusMessage;
   final String sensorMessage;
-  final String sharedMapMessage;
   final double? currentNoiseDb;
   final int? currentLightLux;
   final double? averageNoiseDb;
@@ -2017,7 +2055,6 @@ class _MapControlSheet extends StatelessWidget {
   final VoidCallback? onLocate;
   final VoidCallback? onSavePlace;
   final VoidCallback onToggleSensors;
-  final VoidCallback? onToggleSharedMap;
   final VoidCallback onShowSavedPlaces;
   final VoidCallback? onShowSharedPlaces;
   final ValueChanged<bool> onToggleSharedPlaces;
@@ -2112,21 +2149,6 @@ class _MapControlSheet extends StatelessWidget {
                   ),
                   label: Text(isSensorScanning ? 'Stop sensors' : 'Sensors'),
                 ),
-                FilledButton.tonalIcon(
-                  onPressed: onToggleSharedMap,
-                  icon: Icon(
-                    isMqttConnected
-                        ? Icons.cloud_done_outlined
-                        : Icons.cloud_outlined,
-                  ),
-                  label: Text(
-                    isMqttConnecting
-                        ? 'Connecting'
-                        : isMqttConnected
-                        ? 'Shared on'
-                        : 'Shared map',
-                  ),
-                ),
               ],
             ),
             const SizedBox(height: 14),
@@ -2184,22 +2206,13 @@ class _MapControlSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    sharedMapMessage,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.white70,
-                    ),
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: onShowSharedPlaces,
-                  icon: const Icon(Icons.public),
-                  label: const Text('Browse'),
-                ),
-              ],
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: onShowSharedPlaces,
+                icon: const Icon(Icons.public),
+                label: const Text('Browse shared places'),
+              ),
             ),
             FilterChip(
               label: Text('Show shared markers ($sharedCount)'),
