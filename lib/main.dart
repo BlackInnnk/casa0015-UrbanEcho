@@ -958,6 +958,14 @@ class _MapScreenState extends State<MapScreen> {
   final List<SharedPlaceLog> _sharedPlaces = [];
   double? _currentNoiseDb;
   int? _currentLightLux;
+  int _noiseSampleCount = 0;
+  int _lightSampleCount = 0;
+  double _noiseSampleTotal = 0;
+  int _lightSampleTotal = 0;
+  double? _minNoiseDb;
+  double? _maxNoiseDb;
+  int? _minLightLux;
+  int? _maxLightLux;
   bool _isLoading = true;
   bool _isSensorScanning = false;
   bool _isMqttConnecting = false;
@@ -1111,8 +1119,9 @@ class _MapScreenState extends State<MapScreen> {
       context: context,
       builder: (context) => _SavePlaceDialog(
         point: location,
-        noiseDb: _currentNoiseDb,
-        lightLux: _currentLightLux,
+        noiseDb: _averageCurrentNoiseDb,
+        lightLux: _averageCurrentLightLux,
+        sensorSummary: _sensorSampleSummary,
       ),
     );
 
@@ -1499,9 +1508,59 @@ class _MapScreenState extends State<MapScreen> {
     await _startSensors();
   }
 
+  double? get _averageCurrentNoiseDb {
+    if (_noiseSampleCount == 0) {
+      return _currentNoiseDb;
+    }
+
+    return _noiseSampleTotal / _noiseSampleCount;
+  }
+
+  int? get _averageCurrentLightLux {
+    if (_lightSampleCount == 0) {
+      return _currentLightLux;
+    }
+
+    return (_lightSampleTotal / _lightSampleCount).round();
+  }
+
+  String get _sensorSampleSummary {
+    if (_noiseSampleCount == 0 && _lightSampleCount == 0) {
+      return 'No sensor samples collected yet.';
+    }
+
+    final parts = <String>[];
+    if (_noiseSampleCount > 0) {
+      parts.add(
+        'Noise avg ${_formatNoiseValue(_averageCurrentNoiseDb)} '
+        '(${_formatNoiseValue(_minNoiseDb)}-${_formatNoiseValue(_maxNoiseDb)}, $_noiseSampleCount samples)',
+      );
+    }
+    if (_lightSampleCount > 0) {
+      parts.add(
+        'Light avg ${_formatLightValue(_averageCurrentLightLux)} '
+        '(${_formatLightValue(_minLightLux)}-${_formatLightValue(_maxLightLux)}, $_lightSampleCount samples)',
+      );
+    }
+
+    return parts.join('\n');
+  }
+
+  void _resetSensorSamples() {
+    _noiseSampleCount = 0;
+    _lightSampleCount = 0;
+    _noiseSampleTotal = 0;
+    _lightSampleTotal = 0;
+    _minNoiseDb = null;
+    _maxNoiseDb = null;
+    _minLightLux = null;
+    _maxLightLux = null;
+  }
+
   Future<void> _startSensors() async {
     setState(() {
       _sensorMessage = 'Starting sensors...';
+      _resetSensorSamples();
     });
 
     final microphoneStatus = await Permission.microphone.request();
@@ -1526,8 +1585,17 @@ class _MapScreenState extends State<MapScreen> {
           return;
         }
         setState(() {
-          _currentNoiseDb = reading.meanDecibel;
-          _sensorMessage = 'Sensors running.';
+          final noise = reading.meanDecibel;
+          _currentNoiseDb = noise;
+          _noiseSampleCount += 1;
+          _noiseSampleTotal += noise;
+          _minNoiseDb = _minNoiseDb == null
+              ? noise
+              : (_minNoiseDb! < noise ? _minNoiseDb : noise);
+          _maxNoiseDb = _maxNoiseDb == null
+              ? noise
+              : (_maxNoiseDb! > noise ? _maxNoiseDb : noise);
+          _sensorMessage = 'Sensors running. Averaging recent samples.';
         });
       },
       onError: (_) {
@@ -1546,7 +1614,19 @@ class _MapScreenState extends State<MapScreen> {
           return;
         }
         setState(() {
-          _currentLightLux = lux < 0 ? null : lux;
+          if (lux < 0) {
+            _currentLightLux = null;
+            return;
+          }
+          _currentLightLux = lux;
+          _lightSampleCount += 1;
+          _lightSampleTotal += lux;
+          _minLightLux = _minLightLux == null
+              ? lux
+              : (_minLightLux! < lux ? _minLightLux : lux);
+          _maxLightLux = _maxLightLux == null
+              ? lux
+              : (_maxLightLux! > lux ? _maxLightLux : lux);
         });
       },
       onError: (_) {
@@ -1692,6 +1772,9 @@ class _MapScreenState extends State<MapScreen> {
                   sharedMapMessage: _sharedMapMessage,
                   currentNoiseDb: _currentNoiseDb,
                   currentLightLux: _currentLightLux,
+                  averageNoiseDb: _averageCurrentNoiseDb,
+                  averageLightLux: _averageCurrentLightLux,
+                  sensorSampleSummary: _sensorSampleSummary,
                   selectedPlaceType: _selectedMapPlaceType,
                   visibleSavedCount: visibleSavedPlaces.length,
                   savedCount: widget.savedPlaces.length,
@@ -1741,6 +1824,9 @@ class _MapControlSheet extends StatelessWidget {
     required this.sharedMapMessage,
     required this.currentNoiseDb,
     required this.currentLightLux,
+    required this.averageNoiseDb,
+    required this.averageLightLux,
+    required this.sensorSampleSummary,
     required this.selectedPlaceType,
     required this.visibleSavedCount,
     required this.savedCount,
@@ -1767,6 +1853,9 @@ class _MapControlSheet extends StatelessWidget {
   final String sharedMapMessage;
   final double? currentNoiseDb;
   final int? currentLightLux;
+  final double? averageNoiseDb;
+  final int? averageLightLux;
+  final String sensorSampleSummary;
   final String selectedPlaceType;
   final int visibleSavedCount;
   final int savedCount;
@@ -1912,19 +2001,32 @@ class _MapControlSheet extends StatelessWidget {
               children: [
                 _SensorChip(
                   icon: Icons.graphic_eq,
-                  label: 'Noise: ${_formatNoiseValue(currentNoiseDb)}',
+                  label: 'Now noise: ${_formatNoiseValue(currentNoiseDb)}',
                 ),
                 _SensorChip(
                   icon: Icons.wb_sunny_outlined,
-                  label: 'Light: ${_formatLightValue(currentLightLux)}',
+                  label: 'Now light: ${_formatLightValue(currentLightLux)}',
+                ),
+                _SensorChip(
+                  icon: Icons.analytics_outlined,
+                  label: 'Avg noise: ${_formatNoiseValue(averageNoiseDb)}',
+                ),
+                _SensorChip(
+                  icon: Icons.light_mode_outlined,
+                  label: 'Avg light: ${_formatLightValue(averageLightLux)}',
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              sensorSampleSummary,
+              style: theme.textTheme.bodySmall?.copyWith(color: Colors.white54),
             ),
             const SizedBox(height: 10),
             _EnvironmentFitCard(
               assessment: _assessEnvironmentValues(
-                noiseDb: currentNoiseDb,
-                lightLux: currentLightLux,
+                noiseDb: averageNoiseDb,
+                lightLux: averageLightLux,
               ),
             ),
             const SizedBox(height: 14),
@@ -2344,12 +2446,14 @@ class _SavePlaceDialog extends StatefulWidget {
     required this.point,
     this.noiseDb,
     this.lightLux,
+    this.sensorSummary,
     this.existingPlace,
   });
 
   final LatLng point;
   final double? noiseDb;
   final int? lightLux;
+  final String? sensorSummary;
   final SavedPlaceLog? existingPlace;
 
   @override
@@ -2474,6 +2578,15 @@ class _SavePlaceDialogState extends State<_SavePlaceDialog> {
                 context,
               ).textTheme.bodySmall?.copyWith(color: Colors.white70),
             ),
+            if (widget.sensorSummary != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                widget.sensorSummary!,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: Colors.white54),
+              ),
+            ],
           ],
         ),
       ),
