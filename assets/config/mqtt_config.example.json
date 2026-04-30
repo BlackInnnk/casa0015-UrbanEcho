@@ -1,0 +1,7 @@
+{
+  "host": "your-mqtt-server.example.com",
+  "port": 1883,
+  "username": "your-mqtt-username",
+  "password": "your-mqtt-password",
+  "topicPrefix": "urbanecho/places"
+}

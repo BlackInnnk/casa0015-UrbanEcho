@@ -54,3 +54,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local MQTT credentials. Commit only the example config.
+/assets/config/mqtt_config.json

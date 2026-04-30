@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -26,20 +27,24 @@ const List<String> _historySortOptions = [
   'Brightest',
   'Dimmest',
 ];
-const String _mqttHost = String.fromEnvironment(
+const String _mqttConfigAssetPath = 'assets/config/mqtt_config.json';
+const String _defaultMqttHost = String.fromEnvironment(
   'MQTT_HOST',
   defaultValue: 'your-mqtt-host.example.com',
 );
-const int _mqttPort = int.fromEnvironment('MQTT_PORT', defaultValue: 1883);
-const String _mqttUser = String.fromEnvironment(
+const int _defaultMqttPort = int.fromEnvironment(
+  'MQTT_PORT',
+  defaultValue: 1883,
+);
+const String _defaultMqttUser = String.fromEnvironment(
   'MQTT_USER',
   defaultValue: 'your-username',
 );
-const String _mqttPass = String.fromEnvironment(
+const String _defaultMqttPass = String.fromEnvironment(
   'MQTT_PASS',
   defaultValue: 'your-password',
 );
-const String _mqttTopicPrefix = String.fromEnvironment(
+const String _defaultMqttTopicPrefix = String.fromEnvironment(
   'MQTT_TOPIC_PREFIX',
   defaultValue: 'urbanecho/places',
 );
@@ -217,6 +222,49 @@ class SharedPlaceGroup {
     return places.where((sharedPlace) {
       return sharedPlace.place.comment.trim().isNotEmpty;
     }).length;
+  }
+}
+
+class MqttSettings {
+  const MqttSettings({
+    required this.host,
+    required this.port,
+    required this.username,
+    required this.password,
+    required this.topicPrefix,
+  });
+
+  final String host;
+  final int port;
+  final String username;
+  final String password;
+  final String topicPrefix;
+
+  static const defaults = MqttSettings(
+    host: _defaultMqttHost,
+    port: _defaultMqttPort,
+    username: _defaultMqttUser,
+    password: _defaultMqttPass,
+    topicPrefix: _defaultMqttTopicPrefix,
+  );
+
+  bool get isConfigured {
+    return host != 'your-mqtt-host.example.com' &&
+        username != 'your-username' &&
+        password != 'your-password' &&
+        host.trim().isNotEmpty &&
+        username.trim().isNotEmpty &&
+        password.trim().isNotEmpty;
+  }
+
+  factory MqttSettings.fromJson(Map<String, Object?> json) {
+    return MqttSettings(
+      host: json['host'] as String? ?? defaults.host,
+      port: (json['port'] as num?)?.toInt() ?? defaults.port,
+      username: json['username'] as String? ?? defaults.username,
+      password: json['password'] as String? ?? defaults.password,
+      topicPrefix: json['topicPrefix'] as String? ?? defaults.topicPrefix,
+    );
   }
 }
 
@@ -1007,6 +1055,7 @@ class _MapScreenState extends State<MapScreen> {
   StreamSubscription<List<MqttReceivedMessage<MqttMessage?>>?>?
   _mqttSubscription;
   MqttServerClient? _mqttClient;
+  MqttSettings _mqttSettings = MqttSettings.defaults;
   final List<SharedPlaceLog> _sharedPlaces = [];
   double? _currentNoiseDb;
   int? _currentLightLux;
@@ -1032,6 +1081,7 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     _loadCurrentLocation();
+    _loadMqttSettings();
   }
 
   @override
@@ -1066,6 +1116,29 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _statusMessage = 'Viewing ${place.name}.';
     });
+  }
+
+  Future<void> _loadMqttSettings() async {
+    try {
+      final raw = await rootBundle.loadString(_mqttConfigAssetPath);
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) {
+        return;
+      }
+
+      final settings = MqttSettings.fromJson(
+        Map<String, Object?>.from(decoded),
+      );
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _mqttSettings = settings;
+      });
+    } catch (_) {
+      // The ignored local config is optional. Fall back to --dart-define values.
+    }
   }
 
   Future<void> _loadCurrentLocation() async {
@@ -1395,10 +1468,10 @@ class _MapScreenState extends State<MapScreen> {
       return;
     }
 
-    if (!_hasMqttConfig) {
+    if (!_mqttSettings.isConfigured) {
       setState(() {
         _sharedMapMessage =
-            'MQTT config missing. Run with --dart-define values.';
+            'MQTT config missing. Add local mqtt_config.json or --dart-define values.';
       });
       return;
     }
@@ -1409,9 +1482,9 @@ class _MapScreenState extends State<MapScreen> {
     });
 
     final client = MqttServerClient.withPort(
-      _mqttHost,
+      _mqttSettings.host,
       _mqttClientId,
-      _mqttPort,
+      _mqttSettings.port,
     );
     client.logging(on: false);
     client.keepAlivePeriod = 30;
@@ -1436,7 +1509,7 @@ class _MapScreenState extends State<MapScreen> {
     };
     client.connectionMessage = MqttConnectMessage()
         .withClientIdentifier(_mqttClientId)
-        .authenticateAs(_mqttUser, _mqttPass)
+        .authenticateAs(_mqttSettings.username, _mqttSettings.password)
         .startClean()
         .withWillQos(MqttQos.atLeastOnce);
 
@@ -1447,7 +1520,7 @@ class _MapScreenState extends State<MapScreen> {
         throw StateError('MQTT connection failed');
       }
 
-      client.subscribe('$_mqttTopicPrefix/#', MqttQos.atLeastOnce);
+      client.subscribe('${_mqttSettings.topicPrefix}/#', MqttQos.atLeastOnce);
       await _mqttSubscription?.cancel();
       _mqttSubscription = client.updates?.listen(_handleSharedPlaceMessages);
 
@@ -1560,7 +1633,7 @@ class _MapScreenState extends State<MapScreen> {
       ..addString(jsonEncode(sharedPlace.toJson()));
 
     client.publishMessage(
-      '$_mqttTopicPrefix/${sharedPlace.id}',
+      '${_mqttSettings.topicPrefix}/${sharedPlace.id}',
       MqttQos.atLeastOnce,
       builder.payload!,
       retain: true,
@@ -3227,12 +3300,6 @@ String _formatTime(DateTime value) {
   final minute = value.minute.toString().padLeft(2, '0');
   final second = value.second.toString().padLeft(2, '0');
   return '$hour:$minute:$second';
-}
-
-bool get _hasMqttConfig {
-  return _mqttHost != 'your-mqtt-host.example.com' &&
-      _mqttUser != 'your-username' &&
-      _mqttPass != 'your-password';
 }
 
 String _sharedPlaceId(SavedPlaceLog place) {
