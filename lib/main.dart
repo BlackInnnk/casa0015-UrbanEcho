@@ -391,7 +391,19 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      HomeScreen(savedPlaceCount: _savedPlaces.length),
+      HomeScreen(
+        savedPlaceCount: _savedPlaces.length,
+        onOpenMap: () {
+          setState(() {
+            _currentIndex = 1;
+          });
+        },
+        onOpenFavorites: () {
+          setState(() {
+            _currentIndex = 2;
+          });
+        },
+      ),
       MapScreen(
         savedPlaces: _savedPlaces,
         onSavePlace: _savePlace,
@@ -441,9 +453,16 @@ class _AppShellState extends State<AppShell> {
 }
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key, required this.savedPlaceCount});
+  const HomeScreen({
+    super.key,
+    required this.savedPlaceCount,
+    required this.onOpenMap,
+    required this.onOpenFavorites,
+  });
 
   final int savedPlaceCount;
+  final VoidCallback onOpenMap;
+  final VoidCallback onOpenFavorites;
 
   @override
   Widget build(BuildContext context) {
@@ -453,67 +472,72 @@ class HomeScreen extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
         children: [
-          Text(
-            'UrbanEcho',
-            style: theme.textTheme.displaySmall?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Record places, comments, and revisit saved locations on the map.',
-            style: theme.textTheme.titleMedium?.copyWith(color: Colors.white70),
-          ),
-          const SizedBox(height: 24),
           Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(22),
             decoration: BoxDecoration(
-              color: const Color(0xFF1A2127),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Colors.white12),
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF163A34), Color(0xFF12161A)],
+              ),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: const Color(0x337EE4C5)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                const _FeatureChip(label: 'City place journal'),
+                const SizedBox(height: 18),
                 Text(
-                  'Current milestone',
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: const Color(0xFF7EE4C5),
+                  'UrbanEcho',
+                  style: theme.textTheme.displaySmall?.copyWith(
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 Text(
-                  'The app can request location, show your current position, and save place logs in the current session.',
-                  style: theme.textTheme.bodyLarge,
+                  'Find and remember study, rest, and social spaces around the city.',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: Colors.white70,
+                  ),
                 ),
-                const SizedBox(height: 16),
-                const _FeatureChip(label: 'Current location enabled'),
-                const SizedBox(height: 8),
-                const _FeatureChip(label: 'Save current place'),
-                const SizedBox(height: 8),
-                _FeatureChip(label: 'Saved points: $savedPlaceCount'),
+                const SizedBox(height: 20),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: onOpenMap,
+                      icon: const Icon(Icons.map_outlined),
+                      label: const Text('Open map'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: onOpenFavorites,
+                      icon: const Icon(Icons.bookmark_border),
+                      label: Text('Favorites ($savedPlaceCount)'),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
-          const SizedBox(height: 24),
-          Text(
-            'Next planned features',
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          const SizedBox(height: 22),
+          const _HomeSectionHeader(title: 'Find places for'),
           const SizedBox(height: 12),
-          const _NextStep(
-            title: 'Noise sensing',
-            description: 'Capture sound level and combine it with place data.',
+          const Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _UseCaseChip(icon: Icons.menu_book_outlined, label: 'Study'),
+              _UseCaseChip(icon: Icons.spa_outlined, label: 'Rest'),
+              _UseCaseChip(icon: Icons.groups_outlined, label: 'Social'),
+            ],
           ),
-          const _NextStep(
-            title: 'Notes and tags',
-            description: 'Add manual labels to saved locations.',
-          ),
-          const _NextStep(
-            title: 'History view',
-            description: 'Review saved records and jump back to the map.',
+          const SizedBox(height: 22),
+          _HomeActivityCard(
+            savedPlaceCount: savedPlaceCount,
+            onOpenMap: onOpenMap,
+            onOpenFavorites: onOpenFavorites,
           ),
         ],
       ),
@@ -3405,28 +3429,132 @@ class _FeatureChip extends StatelessWidget {
   }
 }
 
-class _NextStep extends StatelessWidget {
-  const _NextStep({required this.title, required this.description});
+class _HomeSectionHeader extends StatelessWidget {
+  const _HomeSectionHeader({required this.title});
 
   final String title;
-  final String description;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-        leading: const CircleAvatar(
-          backgroundColor: Color(0xFF1D6F5F),
-          child: Icon(Icons.arrow_outward, color: Colors.white),
+    return Text(
+      title,
+      style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+    );
+  }
+}
+
+class _UseCaseChip extends StatelessWidget {
+  const _UseCaseChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A2127),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: const Color(0xFF7EE4C5), size: 19),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
         ),
-        title: Text(title),
-        subtitle: Text(
-          description,
-          style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white70),
+      ),
+    );
+  }
+}
+
+class _HomeActivityCard extends StatelessWidget {
+  const _HomeActivityCard({
+    required this.savedPlaceCount,
+    required this.onOpenMap,
+    required this.onOpenFavorites,
+  });
+
+  final int savedPlaceCount;
+  final VoidCallback onOpenMap;
+  final VoidCallback onOpenFavorites;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final savedLabel = savedPlaceCount == 1 ? 'saved place' : 'saved places';
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF151B20),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const CircleAvatar(
+                  backgroundColor: Color(0xFF0F3029),
+                  child: Icon(Icons.bookmark_border, color: Color(0xFF7EE4C5)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Your places',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              savedPlaceCount == 0
+                  ? 'No favorites saved yet. Explore the map and save places you want to revisit.'
+                  : '$savedPlaceCount $savedLabel saved for quick access.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: Colors.white70,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: onOpenMap,
+                    icon: const Icon(Icons.explore_outlined),
+                    label: const Text('Explore'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onOpenFavorites,
+                    icon: const Icon(Icons.bookmark),
+                    label: const Text('Saved'),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
