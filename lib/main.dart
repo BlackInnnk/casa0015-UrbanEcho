@@ -20,6 +20,7 @@ const List<String> _historySortOptions = [
   'Best study fit',
   'Best rest fit',
   'Best social fit',
+  'Best rated',
   'Quietest',
   'Noisiest',
   'Brightest',
@@ -75,6 +76,7 @@ class SavedPlaceLog {
     required this.name,
     required this.placeType,
     required this.comment,
+    required this.rating,
     required this.noiseDb,
     required this.lightLux,
   });
@@ -84,16 +86,24 @@ class SavedPlaceLog {
   final String name;
   final String placeType;
   final String comment;
+  final double? rating;
   final double? noiseDb;
   final int? lightLux;
 
-  SavedPlaceLog copyWith({String? name, String? placeType, String? comment}) {
+  SavedPlaceLog copyWith({
+    String? name,
+    String? placeType,
+    String? comment,
+    double? rating,
+    bool clearRating = false,
+  }) {
     return SavedPlaceLog(
       point: point,
       recordedAt: recordedAt,
       name: name ?? this.name,
       placeType: placeType ?? this.placeType,
       comment: comment ?? this.comment,
+      rating: clearRating ? null : rating ?? this.rating,
       noiseDb: this.noiseDb,
       lightLux: this.lightLux,
     );
@@ -107,6 +117,7 @@ class SavedPlaceLog {
       'name': name,
       'placeType': placeType,
       'comment': comment,
+      'rating': rating,
       'noiseDb': noiseDb,
       'lightLux': lightLux,
     };
@@ -124,6 +135,7 @@ class SavedPlaceLog {
       name: json['name'] as String? ?? 'Saved place',
       placeType: json['placeType'] as String? ?? _placeTypes.first,
       comment: json['comment'] as String? ?? '',
+      rating: (json['rating'] as num?)?.toDouble(),
       noiseDb: (json['noiseDb'] as num?)?.toDouble(),
       lightLux: (json['lightLux'] as num?)?.toInt(),
     );
@@ -165,6 +177,46 @@ class SharedPlaceLog {
           DateTime.now(),
       place: SavedPlaceLog.fromJson(json),
     );
+  }
+}
+
+class SharedPlaceGroup {
+  const SharedPlaceGroup({required this.places});
+
+  final List<SharedPlaceLog> places;
+
+  SharedPlaceLog get latestPlace {
+    return places.reduce((latest, next) {
+      return next.uploadedAt.isAfter(latest.uploadedAt) ? next : latest;
+    });
+  }
+
+  SavedPlaceLog get place => latestPlace.place;
+
+  DateTime get uploadedAt => latestPlace.uploadedAt;
+
+  double? get averageRating {
+    final ratings = places
+        .map((sharedPlace) => sharedPlace.place.rating)
+        .whereType<double>()
+        .toList();
+    if (ratings.isEmpty) {
+      return null;
+    }
+
+    return ratings.reduce((sum, value) => sum + value) / ratings.length;
+  }
+
+  int get ratingCount {
+    return places
+        .where((sharedPlace) => sharedPlace.place.rating != null)
+        .length;
+  }
+
+  int get commentCount {
+    return places.where((sharedPlace) {
+      return sharedPlace.place.comment.trim().isNotEmpty;
+    }).length;
   }
 }
 
@@ -1217,23 +1269,23 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _showSharedPlacesSheet() async {
-    final selectedPlace = await showModalBottomSheet<SharedPlaceLog>(
+    final selectedGroup = await showModalBottomSheet<SharedPlaceGroup>(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF111417),
       builder: (context) => _SharedPlacesSheet(
-        places: _sharedPlaces,
+        groups: _sharedPlaceGroups,
         currentLocation: _currentLocation,
         onSaveLocally: _saveSharedPlaceLocally,
       ),
     );
 
-    if (selectedPlace == null || !mounted) {
+    if (selectedGroup == null || !mounted) {
       return;
     }
 
-    _mapController.move(selectedPlace.place.point, 17);
-    await _showSharedPlaceDetails(selectedPlace);
+    _mapController.move(selectedGroup.place.point, 17);
+    await _showSharedPlaceDetails(selectedGroup);
   }
 
   Future<void> _showPlaceDetails(SavedPlaceLog place) async {
@@ -1248,7 +1300,7 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  Future<void> _showSharedPlaceDetails(SharedPlaceLog sharedPlace) async {
+  Future<void> _showSharedPlaceDetails(SharedPlaceGroup group) async {
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1259,23 +1311,37 @@ class _MapScreenState extends State<MapScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _SavedPlaceSummary(
-                place: sharedPlace.place,
+                place: group.place,
                 currentLocation: _currentLocation,
+                averageRating: group.averageRating,
+                ratingCount: group.ratingCount,
               ),
               const SizedBox(height: 10),
               Text(
-                'Uploaded by ${sharedPlace.source} • ${_formatTime(sharedPlace.uploadedAt)}',
+                '${group.ratingCount} rating(s) • ${group.commentCount} public comment(s)',
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: Colors.white54),
               ),
+              const SizedBox(height: 10),
+              ...group.places
+                  .where((sharedPlace) {
+                    return sharedPlace.place.comment.trim().isNotEmpty ||
+                        sharedPlace.place.rating != null;
+                  })
+                  .map(
+                    (sharedPlace) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _SharedCommentCard(sharedPlace: sharedPlace),
+                    ),
+                  ),
             ],
           ),
         ),
         actions: [
           TextButton.icon(
             onPressed: () {
-              _saveSharedPlaceLocally(sharedPlace);
+              _saveSharedPlaceLocally(group.latestPlace);
               Navigator.of(context).pop();
             },
             icon: const Icon(Icons.bookmark_add_outlined),
@@ -1288,6 +1354,10 @@ class _MapScreenState extends State<MapScreen> {
         ],
       ),
     );
+  }
+
+  List<SharedPlaceGroup> get _sharedPlaceGroups {
+    return _groupSharedPlaces(_sharedPlaces);
   }
 
   void _saveSharedPlaceLocally(SharedPlaceLog sharedPlace) {
@@ -1674,8 +1744,11 @@ class _MapScreenState extends State<MapScreen> {
       _selectedMapPlaceType,
     );
     final visibleSharedPlaces = _showSharedPlaces
-        ? _filterSharedPlacesByType(_sharedPlaces, _selectedMapPlaceType)
-        : <SharedPlaceLog>[];
+        ? _filterSharedPlaceGroupsByType(
+            _sharedPlaceGroups,
+            _selectedMapPlaceType,
+          )
+        : <SharedPlaceGroup>[];
 
     return Scaffold(
       appBar: AppBar(
@@ -1726,15 +1799,15 @@ class _MapScreenState extends State<MapScreen> {
                         ),
                       ),
                       ...visibleSharedPlaces.map(
-                        (sharedPlace) => Marker(
-                          point: sharedPlace.place.point,
+                        (sharedGroup) => Marker(
+                          point: sharedGroup.place.point,
                           width: 88,
                           height: 88,
                           child: GestureDetector(
-                            onTap: () => _showSharedPlaceDetails(sharedPlace),
+                            onTap: () => _showSharedPlaceDetails(sharedGroup),
                             child: _MapMarker(
                               color: _placeTypeColor(
-                                sharedPlace.place.placeType,
+                                sharedGroup.place.placeType,
                               ).withValues(alpha: 0.72),
                               icon: Icons.public,
                             ),
@@ -2155,6 +2228,7 @@ class _SavedPlacesSheet extends StatelessWidget {
                       items:
                           [
                                 if (currentLocation != null) 'Nearest',
+                                'Best rated',
                                 'Newest',
                                 'Oldest',
                               ]
@@ -2274,12 +2348,12 @@ class _SavedPlacesSheet extends StatelessWidget {
 
 class _SharedPlacesSheet extends StatelessWidget {
   const _SharedPlacesSheet({
-    required this.places,
+    required this.groups,
     required this.currentLocation,
     required this.onSaveLocally,
   });
 
-  final List<SharedPlaceLog> places;
+  final List<SharedPlaceGroup> groups;
   final LatLng? currentLocation;
   final ValueChanged<SharedPlaceLog> onSaveLocally;
 
@@ -2298,8 +2372,8 @@ class _SharedPlacesSheet extends StatelessWidget {
             minChildSize: 0.32,
             maxChildSize: 0.9,
             builder: (context, scrollController) {
-              final filteredPlaces = _sortSharedPlacesForMapSheet(
-                _filterSharedPlacesByType(places, selectedPlaceType),
+              final filteredGroups = _sortSharedPlaceGroupsForMapSheet(
+                _filterSharedPlaceGroupsByType(groups, selectedPlaceType),
                 selectedSort,
                 currentLocation,
               );
@@ -2329,8 +2403,8 @@ class _SharedPlacesSheet extends StatelessWidget {
                         ),
                         Text(
                           selectedPlaceType == 'All'
-                              ? '${places.length}'
-                              : '${filteredPlaces.length}/${places.length}',
+                              ? '${groups.length}'
+                              : '${filteredGroups.length}/${groups.length}',
                           style: theme.textTheme.titleMedium?.copyWith(
                             color: const Color(0xFF7EE4C5),
                           ),
@@ -2361,6 +2435,7 @@ class _SharedPlacesSheet extends StatelessWidget {
                       items:
                           [
                                 if (currentLocation != null) 'Nearest',
+                                'Best rated',
                                 'Newest',
                                 'Oldest',
                               ]
@@ -2383,7 +2458,7 @@ class _SharedPlacesSheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 14),
                     Expanded(
-                      child: places.isEmpty
+                      child: groups.isEmpty
                           ? Center(
                               child: Text(
                                 'No shared places loaded yet.',
@@ -2392,7 +2467,7 @@ class _SharedPlacesSheet extends StatelessWidget {
                                 ),
                               ),
                             )
-                          : filteredPlaces.isEmpty
+                          : filteredGroups.isEmpty
                           ? Center(
                               child: Text(
                                 'No shared $selectedPlaceType places found.',
@@ -2403,23 +2478,24 @@ class _SharedPlacesSheet extends StatelessWidget {
                             )
                           : ListView.separated(
                               controller: scrollController,
-                              itemCount: filteredPlaces.length,
+                              itemCount: filteredGroups.length,
                               separatorBuilder: (context, index) =>
                                   const SizedBox(height: 10),
                               itemBuilder: (context, index) {
-                                final sharedPlace = filteredPlaces[index];
+                                final group = filteredGroups[index];
                                 return InkWell(
                                   borderRadius: BorderRadius.circular(14),
-                                  onTap: () =>
-                                      Navigator.of(context).pop(sharedPlace),
+                                  onTap: () => Navigator.of(context).pop(group),
                                   child: _SavedPlaceSummary(
-                                    place: sharedPlace.place,
+                                    place: group.place,
                                     currentLocation: currentLocation,
+                                    averageRating: group.averageRating,
+                                    ratingCount: group.ratingCount,
                                     trailing: IconButton(
                                       tooltip: 'Save locally',
                                       onPressed: () {
-                                        onSaveLocally(sharedPlace);
-                                        Navigator.of(context).pop(sharedPlace);
+                                        onSaveLocally(group.latestPlace);
+                                        Navigator.of(context).pop(group);
                                       },
                                       icon: const Icon(
                                         Icons.bookmark_add_outlined,
@@ -2464,6 +2540,7 @@ class _SavePlaceDialogState extends State<_SavePlaceDialog> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _commentController = TextEditingController();
   String _placeType = _placeTypes.first;
+  double _rating = 0;
 
   @override
   void initState() {
@@ -2477,6 +2554,7 @@ class _SavePlaceDialogState extends State<_SavePlaceDialog> {
     _nameController.text = existingPlace.name;
     _commentController.text = existingPlace.comment;
     _placeType = existingPlace.placeType;
+    _rating = existingPlace.rating ?? 0;
   }
 
   @override
@@ -2499,6 +2577,8 @@ class _SavePlaceDialogState extends State<_SavePlaceDialog> {
             name: name,
             placeType: _placeType,
             comment: comment,
+            rating: _rating == 0 ? null : _rating,
+            clearRating: _rating == 0,
           ) ??
           SavedPlaceLog(
             point: widget.point,
@@ -2506,6 +2586,7 @@ class _SavePlaceDialogState extends State<_SavePlaceDialog> {
             name: name,
             placeType: _placeType,
             comment: comment,
+            rating: _rating == 0 ? null : _rating,
             noiseDb: widget.noiseDb,
             lightLux: widget.lightLux,
           ),
@@ -2560,9 +2641,18 @@ class _SavePlaceDialogState extends State<_SavePlaceDialog> {
               minLines: 2,
               maxLines: 4,
               decoration: const InputDecoration(
-                labelText: 'Comment',
+                labelText: 'Public comment',
                 hintText: 'How does this place feel?',
               ),
+            ),
+            const SizedBox(height: 16),
+            _StarRatingInput(
+              rating: _rating,
+              onChanged: (value) {
+                setState(() {
+                  _rating = value;
+                });
+              },
             ),
             const SizedBox(height: 12),
             Text(
@@ -2600,6 +2690,147 @@ class _SavePlaceDialogState extends State<_SavePlaceDialog> {
           child: Text(widget.existingPlace == null ? 'Save' : 'Update'),
         ),
       ],
+    );
+  }
+}
+
+class _StarRatingInput extends StatelessWidget {
+  const _StarRatingInput({required this.rating, required this.onChanged});
+
+  final double rating;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Rating',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Text(
+              rating == 0 ? 'No rating' : rating.toStringAsFixed(1),
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: const Color(0xFFFFC36A),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        _StarRatingDisplay(rating: rating == 0 ? null : rating),
+        Slider(
+          value: rating,
+          min: 0,
+          max: 5,
+          divisions: 10,
+          label: rating == 0 ? 'No rating' : rating.toStringAsFixed(1),
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+}
+
+class _StarRatingDisplay extends StatelessWidget {
+  const _StarRatingDisplay({required this.rating, this.ratingCount});
+
+  final double? rating;
+  final int? ratingCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = rating;
+    if (value == null || value <= 0) {
+      return Text(
+        'No rating yet',
+        style: Theme.of(
+          context,
+        ).textTheme.labelSmall?.copyWith(color: Colors.white54),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ...List.generate(5, (index) {
+          final starNumber = index + 1;
+          final icon = value >= starNumber
+              ? Icons.star
+              : value >= starNumber - 0.5
+              ? Icons.star_half
+              : Icons.star_border;
+
+          return Icon(icon, size: 16, color: const Color(0xFFFFC36A));
+        }),
+        const SizedBox(width: 6),
+        Text(
+          ratingCount == null
+              ? value.toStringAsFixed(1)
+              : '${value.toStringAsFixed(1)} avg (${ratingCount!})',
+          style: Theme.of(
+            context,
+          ).textTheme.labelSmall?.copyWith(color: const Color(0xFFFFC36A)),
+        ),
+      ],
+    );
+  }
+}
+
+class _SharedCommentCard extends StatelessWidget {
+  const _SharedCommentCard({required this.sharedPlace});
+
+  final SharedPlaceLog sharedPlace;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final comment = sharedPlace.place.comment.trim();
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xAA0F3029),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: _StarRatingDisplay(rating: sharedPlace.place.rating),
+                ),
+                Text(
+                  _formatTime(sharedPlace.uploadedAt),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: Colors.white54,
+                  ),
+                ),
+              ],
+            ),
+            if (comment.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                comment,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: Colors.white70,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -2674,11 +2905,15 @@ class _SavedPlaceSummary extends StatelessWidget {
   const _SavedPlaceSummary({
     required this.place,
     this.currentLocation,
+    this.averageRating,
+    this.ratingCount,
     this.trailing,
   });
 
   final SavedPlaceLog place;
   final LatLng? currentLocation;
+  final double? averageRating;
+  final int? ratingCount;
   final Widget? trailing;
 
   @override
@@ -2733,6 +2968,11 @@ class _SavedPlaceSummary extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
+            ),
+            const SizedBox(height: 4),
+            _StarRatingDisplay(
+              rating: averageRating ?? place.rating,
+              ratingCount: ratingCount,
             ),
             const SizedBox(height: 4),
             Text(
@@ -3022,17 +3262,35 @@ List<SavedPlaceLog> _filterPlacesByType(
   return places.where((place) => place.placeType == placeType).toList();
 }
 
-List<SharedPlaceLog> _filterSharedPlacesByType(
-  List<SharedPlaceLog> places,
+List<SharedPlaceGroup> _filterSharedPlaceGroupsByType(
+  List<SharedPlaceGroup> groups,
   String placeType,
 ) {
   if (placeType == 'All') {
-    return places;
+    return groups;
   }
 
-  return places
-      .where((sharedPlace) => sharedPlace.place.placeType == placeType)
+  return groups.where((group) => group.place.placeType == placeType).toList();
+}
+
+List<SharedPlaceGroup> _groupSharedPlaces(List<SharedPlaceLog> places) {
+  final groupedPlaces = <String, List<SharedPlaceLog>>{};
+  for (final place in places) {
+    final key = _sharedPlaceGroupKey(place.place);
+    groupedPlaces.putIfAbsent(key, () => []).add(place);
+  }
+
+  return groupedPlaces.values
+      .map((places) => SharedPlaceGroup(places: places))
       .toList();
+}
+
+String _sharedPlaceGroupKey(SavedPlaceLog place) {
+  return [
+    place.name.toLowerCase().trim().replaceAll(RegExp(r'\s+'), ' '),
+    place.point.latitude.toStringAsFixed(4),
+    place.point.longitude.toStringAsFixed(4),
+  ].join('|');
 }
 
 List<SavedPlaceLog> _searchPlaces(List<SavedPlaceLog> places, String query) {
@@ -3046,6 +3304,7 @@ List<SavedPlaceLog> _searchPlaces(List<SavedPlaceLog> places, String query) {
       place.name,
       place.comment,
       place.placeType,
+      _formatRatingValue(place.rating),
       _formatNoiseValue(place.noiseDb),
       _formatLightValue(place.lightLux),
     ].join(' ').toLowerCase();
@@ -3066,6 +3325,8 @@ List<SavedPlaceLog> _sortPlaces(List<SavedPlaceLog> places, String sortMode) {
       sortedPlaces.sort((a, b) => _restScore(b).compareTo(_restScore(a)));
     case 'Best social fit':
       sortedPlaces.sort((a, b) => _socialScore(b).compareTo(_socialScore(a)));
+    case 'Best rated':
+      sortedPlaces.sort((a, b) => (b.rating ?? -1).compareTo(a.rating ?? -1));
     case 'Quietest':
       sortedPlaces.sort(
         (a, b) => (a.noiseDb ?? double.infinity).compareTo(
@@ -3108,6 +3369,8 @@ List<SavedPlaceLog> _sortSavedPlacesForMapSheet(
         (a, b) =>
             distance(location, a.point).compareTo(distance(location, b.point)),
       );
+    case 'Best rated':
+      sortedPlaces.sort((a, b) => (b.rating ?? -1).compareTo(a.rating ?? -1));
     case 'Oldest':
       sortedPlaces.sort((a, b) => a.recordedAt.compareTo(b.recordedAt));
     case 'Newest':
@@ -3118,34 +3381,38 @@ List<SavedPlaceLog> _sortSavedPlacesForMapSheet(
   return sortedPlaces;
 }
 
-List<SharedPlaceLog> _sortSharedPlacesForMapSheet(
-  List<SharedPlaceLog> places,
+List<SharedPlaceGroup> _sortSharedPlaceGroupsForMapSheet(
+  List<SharedPlaceGroup> groups,
   String sortMode,
   LatLng? currentLocation,
 ) {
-  final sortedPlaces = List<SharedPlaceLog>.of(places);
+  final sortedGroups = List<SharedPlaceGroup>.of(groups);
 
   switch (sortMode) {
     case 'Nearest':
       final location = currentLocation;
       if (location == null) {
-        return sortedPlaces;
+        return sortedGroups;
       }
       const distance = Distance();
-      sortedPlaces.sort(
+      sortedGroups.sort(
         (a, b) => distance(
           location,
           a.place.point,
         ).compareTo(distance(location, b.place.point)),
       );
+    case 'Best rated':
+      sortedGroups.sort(
+        (a, b) => (b.averageRating ?? -1).compareTo(a.averageRating ?? -1),
+      );
     case 'Oldest':
-      sortedPlaces.sort((a, b) => a.uploadedAt.compareTo(b.uploadedAt));
+      sortedGroups.sort((a, b) => a.uploadedAt.compareTo(b.uploadedAt));
     case 'Newest':
     default:
-      sortedPlaces.sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
+      sortedGroups.sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
   }
 
-  return sortedPlaces;
+  return sortedGroups;
 }
 
 int _placeTypeCount(List<SavedPlaceLog> places, String placeType) {
@@ -3210,6 +3477,10 @@ String _formatNoiseValue(double? value) {
 
 String _formatLightValue(int? value) {
   return value == null ? 'Unknown' : '$value lux';
+}
+
+String _formatRatingValue(double? value) {
+  return value == null ? 'No rating' : '${value.toStringAsFixed(1)} stars';
 }
 
 String _formatDistanceMeters(double value) {
