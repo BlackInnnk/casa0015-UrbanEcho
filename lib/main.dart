@@ -1954,6 +1954,14 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<bool?> _createPlaceAtPoint(LatLng point) async {
+    if (_averageCurrentNoiseDb == null || _averageCurrentLightLux == null) {
+      setState(() {
+        _statusMessage =
+            'Sensor data required. Start Sensors and wait for noise and light readings.';
+      });
+      return false;
+    }
+
     final nearbyPlace = _nearestSharedPlaceWithin(
       point,
       _nearbyPlaceThresholdMeters,
