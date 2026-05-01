@@ -1704,6 +1704,7 @@ class _MapScreenState extends State<MapScreen> {
   bool _isSensorScanning = false;
   bool _isMqttConnecting = false;
   bool _isMqttConnected = false;
+  bool _isSavingDraftPlace = false;
   bool _showSharedPlaces = true;
   bool _showMapFilters = false;
   LatLng? _draftPlacePoint;
@@ -1921,15 +1922,34 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _saveDraftPlace() async {
-    final point = _mapController.camera.center;
+    if (_isSavingDraftPlace) {
+      return;
+    }
 
-    final uploaded = await _createPlaceAtPoint(point);
-    if (!mounted || uploaded != true) {
+    final point = _mapController.camera.center;
+    setState(() {
+      _isSavingDraftPlace = true;
+    });
+
+    bool? uploaded;
+    try {
+      uploaded = await _createPlaceAtPoint(point);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _statusMessage = 'Upload failed. Check network connection.';
+        });
+      }
+    }
+    if (!mounted) {
       return;
     }
 
     setState(() {
-      _draftPlacePoint = null;
+      _isSavingDraftPlace = false;
+      if (uploaded == true) {
+        _draftPlacePoint = null;
+      }
     });
   }
 
@@ -1960,6 +1980,12 @@ class _MapScreenState extends State<MapScreen> {
       return null;
     }
 
+    if (mounted) {
+      setState(() {
+        _statusMessage = 'Uploading ${place.name}...';
+      });
+    }
+
     final uploaded = await _publishSharedPlace(place);
     if (!mounted) {
       return uploaded;
@@ -1968,9 +1994,27 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _statusMessage = uploaded
           ? '${place.name} uploaded.'
-          : 'Could not upload ${place.name}. Check connection.';
+          : 'Upload failed. Check network connection.';
     });
     return uploaded;
+  }
+
+  Future<bool> _waitForMqttConnection({
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+
+    while (DateTime.now().isBefore(deadline)) {
+      if (_isMqttConnected && _mqttClient != null) {
+        return true;
+      }
+      if (!_isMqttConnecting) {
+        return false;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+
+    return _isMqttConnected && _mqttClient != null;
   }
 
   ({SharedPlaceGroup group, double distanceMeters})? _nearestSharedPlaceWithin(
@@ -2308,8 +2352,15 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<bool> _publishSharedPlace(SavedPlaceLog place) async {
+    if (_isMqttConnecting) {
+      await _waitForMqttConnection();
+    }
+
     if (!_isMqttConnected || _mqttClient == null) {
       await _connectSharedMap();
+      if (_isMqttConnecting) {
+        await _waitForMqttConnection();
+      }
     }
 
     final client = _mqttClient;
@@ -2663,6 +2714,7 @@ class _MapScreenState extends State<MapScreen> {
                   location: location,
                   draftPlacePoint: _draftPlacePoint,
                   isLoading: _isLoading,
+                  isSavingDraftPlace: _isSavingDraftPlace,
                   isSensorScanning: _isSensorScanning,
                   showSharedPlaces: _showSharedPlaces,
                   showFilters: _showMapFilters,
@@ -2813,6 +2865,7 @@ class _MapControlSheet extends StatelessWidget {
     required this.location,
     required this.draftPlacePoint,
     required this.isLoading,
+    required this.isSavingDraftPlace,
     required this.isSensorScanning,
     required this.showSharedPlaces,
     required this.showFilters,
@@ -2842,6 +2895,7 @@ class _MapControlSheet extends StatelessWidget {
   final LatLng? location;
   final LatLng? draftPlacePoint;
   final bool isLoading;
+  final bool isSavingDraftPlace;
   final bool isSensorScanning;
   final bool showSharedPlaces;
   final bool showFilters;
@@ -2899,13 +2953,25 @@ class _MapControlSheet extends StatelessWidget {
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: isPlacingDraft
+                  onPressed: isSavingDraftPlace
+                      ? null
+                      : isPlacingDraft
                       ? onSaveDraftPlace
                       : onStartDraftPlace,
                   icon: Icon(
-                    isPlacingDraft ? Icons.check : Icons.add_location_alt,
+                    isSavingDraftPlace
+                        ? Icons.hourglass_top
+                        : isPlacingDraft
+                        ? Icons.check
+                        : Icons.add_location_alt,
                   ),
-                  label: Text(isPlacingDraft ? 'Save here' : 'Create'),
+                  label: Text(
+                    isSavingDraftPlace
+                        ? 'Saving'
+                        : isPlacingDraft
+                        ? 'Save here'
+                        : 'Create',
+                  ),
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
