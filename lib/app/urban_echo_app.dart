@@ -9,7 +9,7 @@ class UrbanEchoApp extends StatelessWidget {
       title: 'UrbanEcho',
       debugShowCheckedModeBanner: false,
       theme: _buildUrbanEchoTheme(),
-      home: const AppShell(),
+      home: const _IntroGate(),
     );
   }
 }

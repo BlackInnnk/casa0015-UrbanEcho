@@ -21,6 +21,7 @@ part 'theme/app_theme.dart';
 part 'models/app_models.dart';
 part 'app/urban_echo_app.dart';
 part 'app/app_shell.dart';
+part 'screens/intro_screen.dart';
 part 'screens/home_screen.dart';
 part 'screens/places_screen.dart';
 part 'screens/map_screen.dart';

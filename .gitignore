@@ -39,7 +39,6 @@ migrate_working_dir/
 /Library/
 /build/
 /coverage/
-/pubspec.lock
 /android/.gradle/
 /android/.kotlin/
 /android/local.properties
