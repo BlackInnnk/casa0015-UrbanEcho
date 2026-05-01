@@ -1687,6 +1687,7 @@ class _MapScreenState extends State<MapScreen> {
   StreamSubscription<NoiseReading>? _noiseSubscription;
   StreamSubscription<List<MqttReceivedMessage<MqttMessage?>>?>?
   _mqttSubscription;
+  Timer? _mqttRefreshTimer;
   MqttServerClient? _mqttClient;
   MqttSettings _mqttSettings = MqttSettings.defaults;
   final List<SharedPlaceLog> _sharedPlaces = [];
@@ -1724,6 +1725,7 @@ class _MapScreenState extends State<MapScreen> {
     _lightSubscription?.cancel();
     _noiseSubscription?.cancel();
     _mqttSubscription?.cancel();
+    _mqttRefreshTimer?.cancel();
     _mqttClient?.disconnect();
     super.dispose();
   }
@@ -1801,6 +1803,9 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _isMqttConnecting = false;
     });
+    if (_mqttSettings.isConfigured) {
+      _startMqttRefreshTimer();
+    }
     await _connectSharedMap();
   }
 
@@ -1955,10 +1960,6 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<bool?> _createPlaceAtPoint(LatLng point) async {
     if (_averageCurrentNoiseDb == null || _averageCurrentLightLux == null) {
-      setState(() {
-        _statusMessage =
-            'Sensor data required. Start Sensors and wait for noise and light readings.';
-      });
       return false;
     }
 
@@ -2256,9 +2257,10 @@ class _MapScreenState extends State<MapScreen> {
         throw StateError('MQTT connection failed');
       }
 
-      client.subscribe('${_mqttSettings.topicPrefix}/#', MqttQos.atLeastOnce);
       await _mqttSubscription?.cancel();
       _mqttSubscription = client.updates?.listen(_handleSharedPlaceMessages);
+      _subscribeToSharedPlaces(client);
+      _startMqttRefreshTimer();
 
       if (!mounted) {
         return;
@@ -2278,6 +2280,41 @@ class _MapScreenState extends State<MapScreen> {
         _isMqttConnected = false;
         _isMqttConnecting = false;
       });
+    }
+  }
+
+  String get _sharedPlacesTopic => '${_mqttSettings.topicPrefix}/#';
+
+  void _subscribeToSharedPlaces(
+    MqttServerClient client, {
+    bool refresh = false,
+  }) {
+    if (refresh) {
+      client.unsubscribe(_sharedPlacesTopic);
+    }
+    client.subscribe(_sharedPlacesTopic, MqttQos.atLeastOnce);
+  }
+
+  void _startMqttRefreshTimer() {
+    _mqttRefreshTimer?.cancel();
+    _mqttRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      _refreshSharedPlacesFromMqtt();
+    });
+  }
+
+  Future<void> _refreshSharedPlacesFromMqtt() async {
+    if (!_mqttSettings.isConfigured) {
+      return;
+    }
+
+    final client = _mqttClient;
+    if (_isMqttConnected && client != null) {
+      _subscribeToSharedPlaces(client, refresh: true);
+      return;
+    }
+
+    if (!_isMqttConnecting) {
+      await _connectSharedMap();
     }
   }
 
@@ -2932,6 +2969,10 @@ class _MapControlSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isPlacingDraft = draftPlacePoint != null;
+    final hasRequiredSensorData =
+        (averageNoiseDb ?? currentNoiseDb) != null &&
+        (averageLightLux ?? currentLightLux) != null;
+    final needsSensorData = isPlacingDraft && !hasRequiredSensorData;
     final activePoint = draftPlacePoint ?? location;
     final assessment = _assessEnvironmentValues(
       noiseDb: averageNoiseDb,
@@ -2963,12 +3004,20 @@ class _MapControlSheet extends StatelessWidget {
                 child: FilledButton.icon(
                   onPressed: isSavingDraftPlace
                       ? null
+                      : needsSensorData
+                      ? isSensorScanning
+                            ? null
+                            : onToggleSensors
                       : isPlacingDraft
                       ? onSaveDraftPlace
                       : onStartDraftPlace,
                   icon: Icon(
                     isSavingDraftPlace
                         ? Icons.hourglass_top
+                        : needsSensorData
+                        ? isSensorScanning
+                              ? Icons.hourglass_top
+                              : Icons.sensors
                         : isPlacingDraft
                         ? Icons.check
                         : Icons.add_location_alt,
@@ -2976,6 +3025,10 @@ class _MapControlSheet extends StatelessWidget {
                   label: Text(
                     isSavingDraftPlace
                         ? 'Saving'
+                        : needsSensorData
+                        ? isSensorScanning
+                              ? 'Waiting for sensors'
+                              : 'Start sensors first'
                         : isPlacingDraft
                         ? 'Save here'
                         : 'Create',
