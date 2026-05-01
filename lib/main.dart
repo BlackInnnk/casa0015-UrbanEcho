@@ -1909,23 +1909,6 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
 
-  void _syncDraftPlaceToMapCenter() {
-    final draftPoint = _draftPlacePoint;
-    if (draftPoint == null) {
-      return;
-    }
-
-    final centerPoint = _mapController.camera.center;
-    if (_distance(draftPoint, centerPoint) < 0.5) {
-      return;
-    }
-
-    setState(() {
-      _draftPlacePoint = centerPoint;
-      _statusMessage = 'Marker is centered. Save here when ready.';
-    });
-  }
-
   Future<void> _saveDraftPlace() async {
     if (_isSavingDraftPlace) {
       return;
@@ -2692,74 +2675,22 @@ class _MapScreenState extends State<MapScreen> {
             children: [
               FlutterMap(
                 mapController: _mapController,
-                options: MapOptions(
-                  initialCenter: _ucl,
-                  initialZoom: 15.2,
-                  onPositionChanged: (_, _) => _syncDraftPlaceToMapCenter(),
-                ),
+                options: MapOptions(initialCenter: _ucl, initialZoom: 15.2),
                 children: [
                   TileLayer(
                     urlTemplate:
                         'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                     userAgentPackageName: 'com.example.urbanecho',
                   ),
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: _ucl,
-                        width: 52,
-                        height: 52,
-                        alignment: Alignment.bottomCenter,
-                        rotate: true,
-                        child: const _MapMarker(
-                          color: _mutedInk,
-                          icon: Icons.school,
-                        ),
-                      ),
-                      ...visibleSavedPlaces.map(
-                        (place) => Marker(
-                          point: place.point,
-                          width: 52,
-                          height: 52,
-                          alignment: Alignment.bottomCenter,
-                          rotate: true,
-                          child: GestureDetector(
-                            onTap: () => _showPlaceDetails(place),
-                            child: _MapMarker(
-                              color: _placeTypeColor(place.placeType),
-                              icon: Icons.bookmark,
-                            ),
-                          ),
-                        ),
-                      ),
-                      ...visibleSharedPlaces.map(
-                        (sharedGroup) => Marker(
-                          point: sharedGroup.place.point,
-                          width: 52,
-                          height: 52,
-                          alignment: Alignment.bottomCenter,
-                          rotate: true,
-                          child: GestureDetector(
-                            onTap: () => _showSharedPlaceDetails(sharedGroup),
-                            child: _MapMarker(
-                              color: _placeTypeColor(
-                                sharedGroup.place.placeType,
-                              ).withValues(alpha: 0.72),
-                              icon: Icons.public,
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (location != null)
-                        Marker(
-                          point: location,
-                          width: 44,
-                          height: 44,
-                          alignment: Alignment.center,
-                          rotate: true,
-                          child: const _CurrentLocationMarker(),
-                        ),
-                    ],
+                  Positioned.fill(
+                    child: _ProjectedMarkerLayer(
+                      campusPoint: _ucl,
+                      currentLocation: location,
+                      savedPlaces: visibleSavedPlaces,
+                      sharedPlaceGroups: visibleSharedPlaces,
+                      onSavedPlaceTap: _showPlaceDetails,
+                      onSharedPlaceTap: _showSharedPlaceDetails,
+                    ),
                   ),
                 ],
               ),
@@ -4563,6 +4494,123 @@ class _RecentPlaceItem extends StatelessWidget {
   }
 }
 
+class _ProjectedMarkerLayer extends StatelessWidget {
+  const _ProjectedMarkerLayer({
+    required this.campusPoint,
+    required this.currentLocation,
+    required this.savedPlaces,
+    required this.sharedPlaceGroups,
+    required this.onSavedPlaceTap,
+    required this.onSharedPlaceTap,
+  });
+
+  final LatLng campusPoint;
+  final LatLng? currentLocation;
+  final List<SavedPlaceLog> savedPlaces;
+  final List<SharedPlaceGroup> sharedPlaceGroups;
+  final Future<void> Function(SavedPlaceLog place) onSavedPlaceTap;
+  final Future<void> Function(SharedPlaceGroup group) onSharedPlaceTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final camera = MapCamera.of(context);
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        _ProjectedMapMarker(
+          camera: camera,
+          point: campusPoint,
+          width: 52,
+          height: 52,
+          anchor: Alignment.bottomCenter,
+          child: const _MapMarker(color: _mutedInk, icon: Icons.school),
+        ),
+        ...savedPlaces.map(
+          (place) => _ProjectedMapMarker(
+            camera: camera,
+            point: place.point,
+            width: 52,
+            height: 52,
+            anchor: Alignment.bottomCenter,
+            child: GestureDetector(
+              onTap: () {
+                onSavedPlaceTap(place);
+              },
+              child: _MapMarker(
+                color: _placeTypeColor(place.placeType),
+                icon: Icons.bookmark,
+              ),
+            ),
+          ),
+        ),
+        ...sharedPlaceGroups.map(
+          (sharedGroup) => _ProjectedMapMarker(
+            camera: camera,
+            point: sharedGroup.place.point,
+            width: 52,
+            height: 52,
+            anchor: Alignment.bottomCenter,
+            child: GestureDetector(
+              onTap: () {
+                onSharedPlaceTap(sharedGroup);
+              },
+              child: _MapMarker(
+                color: _placeTypeColor(
+                  sharedGroup.place.placeType,
+                ).withValues(alpha: 0.72),
+                icon: Icons.public,
+              ),
+            ),
+          ),
+        ),
+        if (currentLocation != null)
+          _ProjectedMapMarker(
+            camera: camera,
+            point: currentLocation!,
+            width: 44,
+            height: 44,
+            anchor: Alignment.center,
+            child: const _CurrentLocationMarker(),
+          ),
+      ],
+    );
+  }
+}
+
+class _ProjectedMapMarker extends StatelessWidget {
+  const _ProjectedMapMarker({
+    required this.camera,
+    required this.point,
+    required this.width,
+    required this.height,
+    required this.anchor,
+    required this.child,
+  });
+
+  final MapCamera camera;
+  final LatLng point;
+  final double width;
+  final double height;
+  final Alignment anchor;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final offset = camera.latLngToScreenOffset(point);
+    final anchorX = (anchor.x + 1) / 2;
+    final anchorY = (anchor.y + 1) / 2;
+
+    return Positioned(
+      left: offset.dx - width * anchorX,
+      top: offset.dy - height * anchorY,
+      width: width,
+      height: height,
+      child: child,
+    );
+  }
+}
+
 class _MapMarker extends StatelessWidget {
   const _MapMarker({required this.color, required this.icon});
 
@@ -4571,41 +4619,38 @@ class _MapMarker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: SizedBox(
-        width: 52,
-        height: 52,
-        child: Stack(
-          alignment: Alignment.topCenter,
-          children: [
-            Icon(
-              Icons.location_on,
-              color: color,
-              size: 52,
-              shadows: const [
-                Shadow(
-                  color: Color(0x33000000),
-                  blurRadius: 8,
-                  offset: Offset(0, 3),
-                ),
-              ],
-            ),
-            Positioned(
-              top: 11,
-              child: Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  color: _paperSurface,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: color.withValues(alpha: 0.18)),
-                ),
-                child: Icon(icon, color: color, size: 13),
+    return SizedBox(
+      width: 52,
+      height: 52,
+      child: Stack(
+        alignment: Alignment.topCenter,
+        children: [
+          Icon(
+            Icons.location_on,
+            color: color,
+            size: 52,
+            shadows: const [
+              Shadow(
+                color: Color(0x33000000),
+                blurRadius: 8,
+                offset: Offset(0, 3),
               ),
+            ],
+          ),
+          Positioned(
+            top: 11,
+            child: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: _paperSurface,
+                shape: BoxShape.circle,
+                border: Border.all(color: color.withValues(alpha: 0.18)),
+              ),
+              child: Icon(icon, color: color, size: 13),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
