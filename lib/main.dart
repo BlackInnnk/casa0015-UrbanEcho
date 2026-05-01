@@ -2014,7 +2014,7 @@ class _MapScreenState extends State<MapScreen> {
     final deadline = DateTime.now().add(timeout);
 
     while (DateTime.now().isBefore(deadline)) {
-      if (_isMqttConnected && _mqttClient != null) {
+      if (_hasActiveMqttConnection) {
         return true;
       }
       if (!_isMqttConnecting) {
@@ -2023,7 +2023,7 @@ class _MapScreenState extends State<MapScreen> {
       await Future<void>.delayed(const Duration(milliseconds: 200));
     }
 
-    return _isMqttConnected && _mqttClient != null;
+    return _hasActiveMqttConnection;
   }
 
   ({SharedPlaceGroup group, double distanceMeters})? _nearestSharedPlaceWithin(
@@ -2202,7 +2202,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _connectSharedMap() async {
-    if (_isMqttConnecting || _isMqttConnected) {
+    if (_isMqttConnecting || _hasActiveMqttConnection) {
       return;
     }
 
@@ -2214,7 +2214,10 @@ class _MapScreenState extends State<MapScreen> {
       return;
     }
 
+    _mqttClient?.disconnect();
     setState(() {
+      _mqttClient = null;
+      _isMqttConnected = false;
       _isMqttConnecting = true;
     });
 
@@ -2285,6 +2288,29 @@ class _MapScreenState extends State<MapScreen> {
 
   String get _sharedPlacesTopic => '${_mqttSettings.topicPrefix}/#';
 
+  bool get _hasActiveMqttConnection {
+    final client = _mqttClient;
+    return client != null &&
+        client.connectionStatus?.state == MqttConnectionState.connected;
+  }
+
+  Future<bool> _ensureMqttConnected() async {
+    if (_hasActiveMqttConnection) {
+      return true;
+    }
+
+    if (_isMqttConnecting) {
+      return _waitForMqttConnection();
+    }
+
+    await _connectSharedMap();
+    if (_isMqttConnecting) {
+      return _waitForMqttConnection();
+    }
+
+    return _hasActiveMqttConnection;
+  }
+
   void _subscribeToSharedPlaces(
     MqttServerClient client, {
     bool refresh = false,
@@ -2308,7 +2334,7 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     final client = _mqttClient;
-    if (_isMqttConnected && client != null) {
+    if (_hasActiveMqttConnection && client != null) {
       _subscribeToSharedPlaces(client, refresh: true);
       return;
     }
@@ -2397,22 +2423,6 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<bool> _publishSharedPlace(SavedPlaceLog place) async {
-    if (_isMqttConnecting) {
-      await _waitForMqttConnection();
-    }
-
-    if (!_isMqttConnected || _mqttClient == null) {
-      await _connectSharedMap();
-      if (_isMqttConnecting) {
-        await _waitForMqttConnection();
-      }
-    }
-
-    final client = _mqttClient;
-    if (!_isMqttConnected || client == null) {
-      return false;
-    }
-
     final sharedPlace = SharedPlaceLog(
       id: _sharedPlaceId(place),
       source: 'anonymous-urbanecho',
@@ -2422,22 +2432,44 @@ class _MapScreenState extends State<MapScreen> {
     final builder = MqttClientPayloadBuilder()
       ..addString(jsonEncode(sharedPlace.toJson()));
 
-    client.publishMessage(
-      '${_mqttSettings.topicPrefix}/${sharedPlace.id}',
-      MqttQos.atLeastOnce,
-      builder.payload!,
-      retain: true,
-    );
-    _upsertSharedPlace(sharedPlace);
+    for (var attempt = 0; attempt < 2; attempt += 1) {
+      final connected = await _ensureMqttConnected();
+      final client = _mqttClient;
+      if (!connected || client == null) {
+        continue;
+      }
 
-    if (!mounted) {
-      return true;
+      try {
+        client.publishMessage(
+          '${_mqttSettings.topicPrefix}/${sharedPlace.id}',
+          MqttQos.atLeastOnce,
+          builder.payload!,
+          retain: true,
+        );
+        _upsertSharedPlace(sharedPlace);
+
+        if (!mounted) {
+          return true;
+        }
+        setState(() {
+          _statusMessage = '${place.name} uploaded.';
+        });
+
+        return true;
+      } catch (_) {
+        client.disconnect();
+        if (!mounted) {
+          return false;
+        }
+        setState(() {
+          _mqttClient = null;
+          _isMqttConnected = false;
+          _isMqttConnecting = false;
+        });
+      }
     }
-    setState(() {
-      _statusMessage = '${place.name} uploaded.';
-    });
 
-    return true;
+    return false;
   }
 
   Future<bool> _deleteSharedPlaceGroup(SharedPlaceGroup group) async {
