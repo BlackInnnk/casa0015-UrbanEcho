@@ -913,7 +913,7 @@ class _MapScreenState extends State<MapScreen> {
           continue;
         }
 
-        final decoded = jsonDecode(raw);
+        final decoded = _decodeSharedPayload(raw);
         if (decoded is! Map) {
           continue;
         }

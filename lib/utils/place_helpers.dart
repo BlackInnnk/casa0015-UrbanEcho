@@ -70,6 +70,15 @@ String? _sharedPlaceIdFromTopic(String topic, String topicPrefix) {
   return id.isEmpty ? null : id;
 }
 
+Object? _decodeSharedPayload(String raw) {
+  try {
+    return jsonDecode(raw);
+  } catch (_) {
+    final sanitizedRaw = raw.replaceAll(RegExp(r'[\x00-\x1F]'), ' ');
+    return jsonDecode(sanitizedRaw);
+  }
+}
+
 List<SavedPlaceLog> _filterPlacesByType(
   List<SavedPlaceLog> places,
   String placeType,
