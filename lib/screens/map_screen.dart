@@ -35,6 +35,8 @@ class _MapScreenState extends State<MapScreen> {
   static const LatLng _ucl = LatLng(51.5246, -0.1340);
   static const double _nearbyPlaceThresholdMeters = 25;
   static const String _localUserIdFileName = 'urbanecho_user_id.txt';
+  static const String _sharedPlacesCacheFileName =
+      'urbanecho_shared_places_cache.json';
 
   final GlobalKey _mapAreaKey = GlobalKey();
   final MapController _mapController = MapController();
@@ -80,6 +82,7 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     _loadLocalUserId();
+    _loadSharedPlaceCache();
     _loadCurrentLocation();
     _loadMqttSettings();
   }
@@ -175,6 +178,57 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _loadLocalUserId() async {
     await _ensureLocalUserId();
+  }
+
+  Future<File> _sharedPlacesCacheFile() async {
+    final directory = await getApplicationDocumentsDirectory();
+    return File('${directory.path}/$_sharedPlacesCacheFileName');
+  }
+
+  Future<void> _loadSharedPlaceCache() async {
+    try {
+      final file = await _sharedPlacesCacheFile();
+      if (!await file.exists()) {
+        return;
+      }
+
+      final raw = await file.readAsString();
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        return;
+      }
+
+      final places = decoded
+          .whereType<Map>()
+          .map(
+            (item) => SharedPlaceLog.fromJson(Map<String, Object?>.from(item)),
+          )
+          .toList();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _sharedPlaces
+          ..clear()
+          ..addAll(places);
+      });
+      _notifySharedPlacesChanged();
+    } catch (_) {
+      // Cached shared places are only a startup fallback.
+    }
+  }
+
+  Future<void> _persistSharedPlaceCache() async {
+    try {
+      final file = await _sharedPlacesCacheFile();
+      await file.writeAsString(
+        jsonEncode(_sharedPlaces.map((place) => place.toJson()).toList()),
+      );
+    } catch (_) {
+      // MQTT should remain usable even if local cache writing fails.
+    }
   }
 
   Future<String> _ensureLocalUserId() async {
@@ -597,9 +651,9 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   SharedPlaceGroup? _currentSharedPlaceGroup(SharedPlaceGroup group) {
-    final targetKey = _sharedPlaceGroupKey(group.place);
+    final targetKey = group.groupId;
     for (final sharedGroup in _sharedPlaceGroups) {
-      if (_sharedPlaceGroupKey(sharedGroup.place) == targetKey) {
+      if (sharedGroup.groupId == targetKey) {
         return sharedGroup;
       }
     }
@@ -890,6 +944,7 @@ class _MapScreenState extends State<MapScreen> {
       }
     });
     _notifySharedPlacesChanged();
+    unawaited(_persistSharedPlaceCache());
   }
 
   void _removeSharedPlacesByIds(Set<String> ids) {
@@ -901,6 +956,7 @@ class _MapScreenState extends State<MapScreen> {
       _sharedPlaces.removeWhere((place) => ids.contains(place.id));
     });
     _notifySharedPlacesChanged();
+    unawaited(_persistSharedPlaceCache());
   }
 
   void _notifySharedPlacesChanged() {
@@ -911,11 +967,13 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<bool> _publishSharedPlace(SavedPlaceLog place) async {
     final userId = await _ensureLocalUserId();
+    final sharedPlaceId = _sharedPlaceId(place);
     final sharedPlace = SharedPlaceLog(
-      id: _sharedPlaceId(place),
+      id: sharedPlaceId,
       source: userId,
       uploadedAt: DateTime.now(),
       place: place,
+      groupId: sharedPlaceId,
     );
     return _publishSharedLog(
       sharedPlace,
@@ -935,10 +993,11 @@ class _MapScreenState extends State<MapScreen> {
       clearRating: review.rating == 0,
     );
     final sharedPlace = SharedPlaceLog(
-      id: existingReview?.id ?? _sharedReviewId(group.place, userId),
+      id: existingReview?.id ?? _sharedReviewId(group.groupId, userId),
       source: userId,
       uploadedAt: DateTime.now(),
       place: place,
+      groupId: group.groupId,
     );
     return _publishSharedLog(sharedPlace, successMessage: 'Review uploaded.');
   }

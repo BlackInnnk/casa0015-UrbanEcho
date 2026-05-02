@@ -971,6 +971,11 @@ class _ProjectedMarkerLayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final camera = MapCamera.of(context);
+    final standaloneSavedPlaces = savedPlaces.where((savedPlace) {
+      return !sharedPlaceGroups.any((sharedGroup) {
+        return _isSameSavedPlace(savedPlace, sharedGroup.place);
+      });
+    }).toList();
 
     return Stack(
       clipBehavior: Clip.none,
@@ -983,7 +988,33 @@ class _ProjectedMarkerLayer extends StatelessWidget {
           anchor: Alignment.bottomCenter,
           child: const _MapMarker(color: _mutedInk, icon: Icons.school),
         ),
-        ...savedPlaces.map(
+        ...sharedPlaceGroups.map((sharedGroup) {
+          final isFavorite = savedPlaces.any((savedPlace) {
+            return _isSameSavedPlace(savedPlace, sharedGroup.place);
+          });
+
+          return _ProjectedMapMarker(
+            camera: camera,
+            point: sharedGroup.place.point,
+            width: 52,
+            height: 52,
+            anchor: Alignment.bottomCenter,
+            child: GestureDetector(
+              onTap: () {
+                onSharedPlaceTap(sharedGroup);
+              },
+              child: _MapMarker(
+                color: isFavorite
+                    ? _deepBrown
+                    : _placeTypeColor(
+                        sharedGroup.place.placeType,
+                      ).withValues(alpha: 0.72),
+                icon: isFavorite ? Icons.bookmark : Icons.public,
+              ),
+            ),
+          );
+        }),
+        ...standaloneSavedPlaces.map(
           (place) => _ProjectedMapMarker(
             camera: camera,
             point: place.point,
@@ -997,26 +1028,6 @@ class _ProjectedMarkerLayer extends StatelessWidget {
               child: _MapMarker(
                 color: _placeTypeColor(place.placeType),
                 icon: Icons.bookmark,
-              ),
-            ),
-          ),
-        ),
-        ...sharedPlaceGroups.map(
-          (sharedGroup) => _ProjectedMapMarker(
-            camera: camera,
-            point: sharedGroup.place.point,
-            width: 52,
-            height: 52,
-            anchor: Alignment.bottomCenter,
-            child: GestureDetector(
-              onTap: () {
-                onSharedPlaceTap(sharedGroup);
-              },
-              child: _MapMarker(
-                color: _placeTypeColor(
-                  sharedGroup.place.placeType,
-                ).withValues(alpha: 0.72),
-                icon: Icons.public,
               ),
             ),
           ),

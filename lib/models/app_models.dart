@@ -79,18 +79,21 @@ class SharedPlaceLog {
     required this.source,
     required this.uploadedAt,
     required this.place,
+    this.groupId,
   });
 
   final String id;
   final String source;
   final DateTime uploadedAt;
   final SavedPlaceLog place;
+  final String? groupId;
 
   Map<String, Object?> toJson() {
     final assessment = _assessEnvironment(place);
 
     return {
       'id': id,
+      'groupId': groupId,
       'source': source,
       'uploadedAt': uploadedAt.toIso8601String(),
       'bestUse': assessment.label,
@@ -107,6 +110,7 @@ class SharedPlaceLog {
           DateTime.tryParse(json['uploadedAt'] as String? ?? '') ??
           DateTime.now(),
       place: SavedPlaceLog.fromJson(json),
+      groupId: json['groupId'] as String?,
     );
   }
 }
@@ -133,6 +137,17 @@ class SharedPlaceGroup {
 
   SavedPlaceLog get place => _mergeSharedPlaceValues();
 
+  String get groupId {
+    for (final place in places) {
+      final groupId = place.groupId;
+      if (groupId != null && groupId.trim().isNotEmpty) {
+        return groupId;
+      }
+    }
+
+    return latestPlace.id;
+  }
+
   SharedPlaceLog get localCopy {
     final latest = latestPlace;
     return SharedPlaceLog(
@@ -140,6 +155,7 @@ class SharedPlaceGroup {
       source: latest.source,
       uploadedAt: latest.uploadedAt,
       place: _mergeSharedPlaceValues(),
+      groupId: groupId,
     );
   }
 

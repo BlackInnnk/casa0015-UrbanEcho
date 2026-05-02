@@ -38,8 +38,8 @@ String _sharedPlaceId(SavedPlaceLog place) {
       .replaceAll(RegExp(r'^_|_$'), '');
 }
 
-String _sharedReviewId(SavedPlaceLog place, String source) {
-  final rawId = [_sharedPlaceGroupKey(place), source].join('_review_');
+String _sharedReviewId(String groupId, String source) {
+  final rawId = [groupId, source].join('_review_');
 
   return rawId
       .toLowerCase()
@@ -95,13 +95,22 @@ List<SharedPlaceGroup> _filterSharedPlaceGroupsByType(
 List<SharedPlaceGroup> _groupSharedPlaces(List<SharedPlaceLog> places) {
   final groupedPlaces = <String, List<SharedPlaceLog>>{};
   for (final place in places) {
-    final key = _sharedPlaceGroupKey(place.place);
+    final key = _sharedLogGroupKey(place);
     groupedPlaces.putIfAbsent(key, () => []).add(place);
   }
 
   return groupedPlaces.values
       .map((places) => SharedPlaceGroup(places: places))
       .toList();
+}
+
+String _sharedLogGroupKey(SharedPlaceLog place) {
+  final groupId = place.groupId;
+  if (groupId != null && groupId.trim().isNotEmpty) {
+    return groupId;
+  }
+
+  return place.id;
 }
 
 String _sharedPlaceGroupKey(SavedPlaceLog place) {
