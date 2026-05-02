@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>UrbanEcho - City Sensing Notebook</title>
+    <meta
+      name="description"
+      content="UrbanEcho is an Android-first Flutter app for sensing, sharing, and reviewing study, rest, and social places in the city."
+    >
+    <style>
+      :root {
+        --cream: #f5f0e8;
+        --paper: #ede8dc;
+        --paper-soft: #fffaf1;
+        --ink: #2e2518;
+        --muted: #7a6e60;
+        --line: #d8cebd;
+        --brown: #4a3420;
+        --terracotta: #c4633a;
+        --teal: #4a8c80;
+        --amber: #b07a40;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, rgba(196, 99, 58, 0.16), transparent 34rem),
+          linear-gradient(180deg, var(--cream), #eee3d4 46%, var(--paper));
+        color: var(--ink);
+        font-family: ui-serif, Georgia, "Times New Roman", serif;
+      }
+
+      img {
+        display: block;
+        max-width: 100%;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .nav {
+        position: fixed;
+        z-index: 20;
+        top: 0;
+        left: 0;
+        right: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 18px clamp(20px, 5vw, 64px);
+        color: var(--paper-soft);
+        mix-blend-mode: difference;
+      }
+
+      .brand {
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .nav a {
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-decoration: none;
+        text-transform: uppercase;
+      }
+
+      .hero {
+        min-height: 100svh;
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);
+        gap: clamp(28px, 6vw, 80px);
+        align-items: center;
+        padding: 90px clamp(22px, 6vw, 82px) 70px;
+        background:
+          linear-gradient(90deg, rgba(46, 37, 24, 0.92), rgba(46, 37, 24, 0.78) 45%, rgba(46, 37, 24, 0.1)),
+          url("../media/02_map.jpg") center / cover;
+        color: var(--paper-soft);
+        overflow: hidden;
+      }
+
+      .hero-copy {
+        max-width: 620px;
+        animation: rise 720ms ease-out both;
+      }
+
+      .eyebrow {
+        margin: 0 0 18px;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: #dbc7b6;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(58px, 12vw, 156px);
+        line-height: 0.82;
+        letter-spacing: -0.08em;
+      }
+
+      .hero h2 {
+        max-width: 520px;
+        margin: 28px 0 0;
+        font-size: clamp(25px, 4vw, 54px);
+        line-height: 1.02;
+        letter-spacing: -0.04em;
+        font-weight: 500;
+      }
+
+      .hero p {
+        max-width: 460px;
+        margin: 24px 0 0;
+        color: #eadccd;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 16px;
+        line-height: 1.65;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 30px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 46px;
+        padding: 0 18px;
+        border-radius: 999px;
+        border: 1px solid rgba(245, 240, 232, 0.45);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        text-decoration: none;
+        text-transform: uppercase;
+        transition: transform 180ms ease, background 180ms ease, color 180ms ease;
+      }
+
+      .button.primary {
+        background: var(--terracotta);
+        border-color: var(--terracotta);
+        color: var(--paper-soft);
+      }
+
+      .button:hover {
+        transform: translateY(-2px);
+      }
+
+      .phone-stack {
+        position: relative;
+        min-height: min(660px, 70svh);
+        animation: drift-in 900ms 120ms ease-out both;
+      }
+
+      .phone {
+        position: absolute;
+        width: min(280px, 38vw);
+        min-width: 190px;
+        border-radius: 34px;
+        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
+        overflow: hidden;
+        background: #111;
+        outline: 8px solid rgba(245, 240, 232, 0.18);
+      }
+
+      .phone img {
+        width: 100%;
+        aspect-ratio: 1080 / 2376;
+        object-fit: cover;
+      }
+
+      .phone.one {
+        right: 16%;
+        top: 0;
+        transform: rotate(2deg);
+      }
+
+      .phone.two {
+        left: 0;
+        bottom: 1%;
+        transform: rotate(-7deg);
+        opacity: 0.92;
+      }
+
+      .phone.three {
+        right: 0;
+        bottom: 8%;
+        transform: rotate(8deg);
+        opacity: 0.96;
+      }
+
+      main {
+        overflow: hidden;
+      }
+
+      section {
+        padding: clamp(68px, 10vw, 128px) clamp(22px, 6vw, 82px);
+      }
+
+      .section-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 0.86fr) minmax(300px, 1.14fr);
+        gap: clamp(28px, 6vw, 80px);
+        align-items: start;
+      }
+
+      .section-title {
+        margin: 0;
+        max-width: 680px;
+        font-size: clamp(34px, 6vw, 78px);
+        line-height: 0.95;
+        letter-spacing: -0.06em;
+        font-weight: 500;
+      }
+
+      .section-copy {
+        max-width: 620px;
+        color: var(--muted);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 16px;
+        line-height: 1.7;
+      }
+
+      .rule-list {
+        margin-top: 28px;
+        border-top: 1px solid var(--line);
+      }
+
+      .rule-item {
+        display: grid;
+        grid-template-columns: 110px 1fr;
+        gap: 22px;
+        padding: 20px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .rule-item strong {
+        color: var(--brown);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .rule-item span {
+        color: var(--muted);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        line-height: 1.55;
+      }
+
+      .image-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: clamp(14px, 2.5vw, 26px);
+        align-items: start;
+      }
+
+      .screen {
+        border-radius: 28px;
+        overflow: hidden;
+        background: var(--paper-soft);
+        box-shadow: 0 20px 60px rgba(74, 52, 32, 0.14);
+        transition: transform 180ms ease, box-shadow 180ms ease;
+      }
+
+      .screen:hover {
+        transform: translateY(-6px);
+        box-shadow: 0 26px 70px rgba(74, 52, 32, 0.19);
+      }
+
+      .screen img {
+        width: 100%;
+        aspect-ratio: 1080 / 2376;
+        object-fit: cover;
+      }
+
+      .split-band {
+        background: var(--brown);
+        color: var(--paper-soft);
+      }
+
+      .split-band .section-copy {
+        color: #dac9b8;
+      }
+
+      .workflow {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        border-top: 1px solid rgba(245, 240, 232, 0.24);
+        margin-top: 42px;
+      }
+
+      .step {
+        min-height: 210px;
+        padding: 22px 18px 0 0;
+        border-right: 1px solid rgba(245, 240, 232, 0.18);
+      }
+
+      .step:last-child {
+        border-right: 0;
+      }
+
+      .step b {
+        display: block;
+        color: var(--terracotta);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 13px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .step p {
+        max-width: 220px;
+        color: #eadccd;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        line-height: 1.55;
+      }
+
+      .gallery {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: clamp(12px, 2vw, 22px);
+      }
+
+      .gallery figure {
+        margin: 0;
+      }
+
+      .gallery figcaption {
+        padding-top: 10px;
+        color: var(--muted);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+
+      .closing {
+        min-height: 56svh;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        background:
+          radial-gradient(circle at center, rgba(74, 140, 128, 0.14), transparent 32rem),
+          var(--paper-soft);
+      }
+
+      .closing h2 {
+        max-width: 850px;
+        margin: 0 auto;
+        font-size: clamp(40px, 8vw, 96px);
+        line-height: 0.93;
+        letter-spacing: -0.06em;
+        font-weight: 500;
+      }
+
+      .closing p {
+        max-width: 620px;
+        margin: 22px auto 0;
+        color: var(--muted);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        line-height: 1.7;
+      }
+
+      .reveal {
+        opacity: 0;
+        transform: translateY(24px);
+        animation: reveal linear both;
+        animation-timeline: view();
+        animation-range: entry 10% cover 32%;
+      }
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(22px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes drift-in {
+        from {
+          opacity: 0;
+          transform: translateY(28px) scale(0.96);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
+      @keyframes reveal {
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          animation: none !important;
+          transition: none !important;
+        }
+
+        .reveal {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      @media (max-width: 920px) {
+        .hero,
+        .section-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .hero {
+          padding-top: 100px;
+        }
+
+        .phone-stack {
+          min-height: 540px;
+        }
+
+        .phone {
+          width: min(240px, 52vw);
+        }
+
+        .image-row,
+        .gallery,
+        .workflow {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
+      @media (max-width: 620px) {
+        .nav {
+          position: absolute;
+          mix-blend-mode: normal;
+        }
+
+        .hero {
+          min-height: auto;
+          padding-bottom: 48px;
+        }
+
+        .phone-stack {
+          min-height: 440px;
+        }
+
+        .phone.one {
+          right: 0;
+        }
+
+        .phone.two {
+          left: 0;
+          bottom: 2%;
+        }
+
+        .phone.three {
+          display: none;
+        }
+
+        .image-row,
+        .gallery,
+        .workflow,
+        .rule-item {
+          grid-template-columns: 1fr;
+        }
+
+        .step {
+          min-height: auto;
+          padding-bottom: 20px;
+          border-right: 0;
+          border-bottom: 1px solid rgba(245, 240, 232, 0.18);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="nav">
+      <div class="brand">UrbanEcho</div>
+      <a href="../README.md">README</a>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">CASA0015 Mobile Systems Prototype</p>
+          <h1>UrbanEcho</h1>
+          <h2>A city notebook that senses how places feel.</h2>
+          <p>
+            Record noise, light, location, notes, ratings, and public feedback so students can compare places for study, rest, and socialising.
+          </p>
+          <div class="actions">
+            <a class="button primary" href="#walkthrough">View walkthrough</a>
+            <a class="button" href="../README.md">Read project notes</a>
+          </div>
+        </div>
+        <div class="phone-stack" aria-label="UrbanEcho app screens">
+          <div class="phone one">
+            <img src="../media/08_place_details.jpg" alt="UrbanEcho place details screen">
+          </div>
+          <div class="phone two">
+            <img src="../media/01_home.jpg" alt="UrbanEcho home screen">
+          </div>
+          <div class="phone three">
+            <img src="../media/05_all_places.jpg" alt="UrbanEcho all places screen">
+          </div>
+        </div>
+      </section>
+
+      <section id="walkthrough" class="reveal">
+        <div class="section-grid">
+          <div>
+            <p class="eyebrow">What the app does</p>
+            <h2 class="section-title">From a place you visit to a shared urban memory.</h2>
+          </div>
+          <div>
+            <p class="section-copy">
+              UrbanEcho is built around a simple loop: sense the environment, create a place, share it online, and let other users add their own comments and ratings.
+            </p>
+            <div class="rule-list">
+              <div class="rule-item">
+                <strong>Sense</strong>
+                <span>Use GPS, microphone noise readings, and ambient light readings to capture context.</span>
+              </div>
+              <div class="rule-item">
+                <strong>Share</strong>
+                <span>Publish shared places and public reviews through MQTT so other users can see them.</span>
+              </div>
+              <div class="rule-item">
+                <strong>Compare</strong>
+                <span>Sort places by rating, activity fit, noise, light, and recency.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="reveal">
+        <div class="image-row">
+          <div class="screen">
+            <img src="../media/02_map.jpg" alt="Map page with place markers">
+          </div>
+          <div class="screen">
+            <img src="../media/03_map_sensor.jpg" alt="Map panel showing sensors and create action">
+          </div>
+          <div class="screen">
+            <img src="../media/04_create_place.jpg" alt="Create place sheet with rating and notes">
+          </div>
+        </div>
+      </section>
+
+      <section class="split-band reveal">
+        <p class="eyebrow">Workflow</p>
+        <h2 class="section-title">The prototype keeps the interaction small enough to test on a real phone.</h2>
+        <div class="workflow">
+          <div class="step">
+            <b>01 Sensors</b>
+            <p>Start noise and light capture before creating a place.</p>
+          </div>
+          <div class="step">
+            <b>02 Map</b>
+            <p>Move the map under the centre marker to choose the exact location.</p>
+          </div>
+          <div class="step">
+            <b>03 All Places</b>
+            <p>Upload the place so it appears for other users through MQTT.</p>
+          </div>
+          <div class="step">
+            <b>04 Reviews</b>
+            <p>Let each user add one editable public rating and comment.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="reveal">
+        <div class="section-grid">
+          <div>
+            <p class="eyebrow">Browsing</p>
+            <h2 class="section-title">All places for discovery, favorites for return visits.</h2>
+          </div>
+          <p class="section-copy">
+            Shared places stay in All Places. Favorites are local bookmarks so a user can keep useful places without changing public data. The detail page shows the current average rating and the public feedback thread.
+          </p>
+        </div>
+        <div class="gallery" style="margin-top: 36px;">
+          <figure>
+            <div class="screen">
+              <img src="../media/05_all_places.jpg" alt="All places list">
+            </div>
+            <figcaption>All Places shows MQTT-synced shared places.</figcaption>
+          </figure>
+          <figure>
+            <div class="screen">
+              <img src="../media/06_place_sort.jpg" alt="Sorting menu">
+            </div>
+            <figcaption>Sorting supports rating, activity fit, noise, light, and recency.</figcaption>
+          </figure>
+          <figure>
+            <div class="screen">
+              <img src="../media/07_fav_places.jpg" alt="Favorites list">
+            </div>
+            <figcaption>Favorites are local bookmarks for quick access.</figcaption>
+          </figure>
+          <figure>
+            <div class="screen">
+              <img src="../media/08_place_details.jpg" alt="Place details with public feedback">
+            </div>
+            <figcaption>Place Details combines fit score, ratings, and comments.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="closing reveal">
+        <div>
+          <p class="eyebrow">Assessment fit</p>
+          <h2>Mobile sensing, shared data, and a complete Android user journey.</h2>
+          <p>
+            UrbanEcho demonstrates on-device sensors, location-aware interaction, MQTT networking, persistent favorites, and an iterative prototype shaped by real testing on an Android phone.
+          </p>
+          <div class="actions" style="justify-content: center;">
+            <a class="button primary" href="../README.md">Open README</a>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -69,6 +69,16 @@ Place Details combines location, environmental fit, sensor readings, average sta
 
 <img src="media/08_place_details.jpg" alt="Place details with environmental fit and public reviews" width="260">
 
+## Landing Page
+
+The project includes a static landing page at:
+
+```text
+docs/index.html
+```
+
+It introduces the app concept, shows the main Android screens, and summarises how UrbanEcho uses sensing, MQTT sharing, favorites, and public feedback. If GitHub Pages is enabled for the repository, the `docs/` folder can be used as the published site source.
+
 ## How It Works
 
 1. The user opens the app and reviews the opening screen.
@@ -78,6 +88,37 @@ Place Details combines location, environmental fit, sensor readings, average sta
 5. If MQTT is configured, the place is uploaded to All Places and synced with other users.
 6. Other users can open Place Details, add or edit their own rating/comment, and see the average score.
 7. Users can bookmark useful shared places into Favorites for quick local access.
+
+## User Testing Scenario
+
+The main testing scenario was based on a student using UrbanEcho on a physical Android phone to compare nearby study, rest, and social spaces.
+
+### Test Goal
+
+Check whether a user can create shared places with real sensor context, browse them later, favorite useful places, and understand public ratings/comments from other users.
+
+### Test Tasks
+
+1. Open the app and understand the purpose from the opening and Home screens.
+2. Open the Map page, grant permissions, locate the current position, and start Sensors.
+3. Create several places by moving the map under the fixed centre marker and filling in the create sheet.
+4. Confirm that the created places appear in All Places and on the map after MQTT sync.
+5. Use sorting and filtering to compare places by activity type, rating, noise, light, and recency.
+6. Favorite one or more places and check that they appear in the Favorites view and on the map.
+7. Open Place Details, review the environmental fit, and add or edit a public rating/comment.
+8. Restart the app and confirm that shared places, favorites, and comments still appear correctly.
+
+### Findings and Iterations
+
+- Map loading was tested on a real Android phone; OpenStreetMap was kept because it worked without a paid API key and was enough for the coursework prototype.
+- Creating a place without sensor data was confusing, so saving now requires sensor readings before the create flow can complete.
+- The original bottom map list covered too much of the map, so places were moved into a dedicated Places page with All Places and Favorites.
+- MQTT shared places did not always appear immediately after restarting, so shared places are cached locally and refreshed from MQTT every 10 seconds.
+- One malformed MQTT payload failed to sync because of an invalid control character, so MQTT JSON parsing now sanitises control characters before decoding.
+- Public comments and ratings originally behaved like local edits, so reviews are now separate MQTT records and each user can edit only their own review.
+- Map and Places counters originally counted raw MQTT messages, including reviews, so counts now use grouped place records.
+- Some small-screen dialogs overflowed, so Place Details rows and actions were changed to wrap on narrow screens.
+- Favorite places were not visually distinct enough on the map, so favorited shared places now use a bookmark marker.
 
 ## Activity Scoring
 
@@ -174,6 +215,7 @@ lib/
   widgets/      Reusable UI components
 assets/
   config/       MQTT example config and ignored local config
+docs/           Static landing page
 android/        Android project files
 ```
 
@@ -187,6 +229,7 @@ UrbanEcho addresses the Mobile Systems coursework requirements by including:
 - External service integration through MQTT-based shared place data.
 - Iterative GitHub development history with incremental commits.
 - Android native testing on a physical phone.
+- A landing page and README walkthrough showing the final app journey.
 
 ## Future Improvements
 
@@ -194,4 +237,4 @@ UrbanEcho addresses the Mobile Systems coursework requirements by including:
 - Add stronger duplicate-place detection and merge suggestions.
 - Add offline-first sync queues for unstable networks.
 - Improve accessibility testing and larger text layouts.
-- Add a landing page and final project video for assessment presentation.
+- Publish the landing page through GitHub Pages and add the final project video for assessment presentation.
