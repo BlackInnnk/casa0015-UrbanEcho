@@ -263,7 +263,7 @@ class _MapControlSheet extends StatelessWidget {
                 child: _MapActionTile(
                   icon: Icons.bookmarks_outlined,
                   label: 'Places',
-                  value: '${sharedCount + savedCount}',
+                  value: '$sharedCount',
                   onTap: onShowPlaces,
                 ),
               ),
