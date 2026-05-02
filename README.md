@@ -17,41 +17,50 @@ The app is not intended to be a scientific pollution monitor. Its goal is to mak
 ## Current Features
 
 - Warm notebook-style interface with Home, Map, and Places views.
-- Intro screen explaining the purpose of the app.
+- Opening screen explaining the purpose of the app.
 - Live sensor scanning for noise and light.
 - Current location detection and map centering.
 - Create places by moving the map under a fixed centre marker.
-- Save place name, activity type, notes, 0-5 star rating, and sensor context.
-- All Places and Favorites views with search, filtering, sorting, and top-rated places.
-- Online shared map using MQTT, including average ratings and public comments.
-- Local favorites for places the user wants to keep.
+- Create shared places with a name, activity type, notes, 0-5 star rating, and sensor context.
+- Places view with All Places, Favorites, search, filtering, sorting, and top-rated places.
+- MQTT-based shared places, average ratings, and public comments.
+- Local favorites for places the user wants to bookmark.
 - Temporary moderation delete action for shared places during prototype testing.
 - OpenStreetMap map tiles through `flutter_map`.
 
 ## Screenshots
 
-> Screenshots are stored under `media/readme/`. The files below should be added before final submission.
+Screenshots are stored under `media/`.
 
-| Home | Map |
+| Opening Screen | Home |
 | --- | --- |
-| ![Home screen](media/readme/01_home.png) | ![Map screen](media/readme/02_map.png) |
+| <img src="media/09_loading_page.jpg" alt="Opening screen" width="260"> | <img src="media/01_home.jpg" alt="Home screen" width="260"> |
 
-| Create Place | Places |
+| Map | Map Controls |
 | --- | --- |
-| ![Create place sheet](media/readme/03_create_place.png) | ![Places screen](media/readme/04_places.png) |
+| <img src="media/02_map.jpg" alt="Map screen" width="260"> | <img src="media/03_map_sensor.jpg" alt="Map controls and sensors" width="260"> |
 
-| Place Details | Shared Comments |
+| Create Place | All Places |
 | --- | --- |
-| ![Place details](media/readme/05_place_details.png) | ![Shared comments](media/readme/06_shared_comments.png) |
+| <img src="media/04_create_place.jpg" alt="Create place sheet" width="260"> | <img src="media/05_all_places.jpg" alt="All places screen" width="260"> |
+
+| Sorting | Favorites |
+| --- | --- |
+| <img src="media/06_place_sort.jpg" alt="Place sorting options" width="260"> | <img src="media/07_fav_places.jpg" alt="Favorite places screen" width="260"> |
+
+| Place Details |
+| --- |
+| <img src="media/08_place_details.jpg" alt="Place details with environmental fit and public reviews" width="260"> |
 
 ## How It Works
 
-1. The user opens the app and starts scanning sensors on the Map page.
-2. The app reads current GPS location, noise level, and light level.
+1. The user opens the app and reviews the opening screen.
+2. On the Map page, the user starts Sensors so the app can read GPS location, noise level, and light level.
 3. The user creates a place by moving the map so the fixed centre marker points to the target location.
-4. A place record is saved with coordinates, sensor readings, activity type, rating, and comment.
-5. If MQTT is configured, the record is uploaded to the shared topic and synced with other users.
-6. Users can browse all shared places, favorite useful places locally, and compare places by activity fit, rating, noise, or light.
+4. The create sheet stores the place name, activity type, note, rating, coordinates, and sensor readings.
+5. If MQTT is configured, the place is uploaded to All Places and synced with other users.
+6. Other users can open Place Details, add or edit their own rating/comment, and see the average score.
+7. Users can bookmark useful shared places into Favorites for quick local access.
 
 ## Activity Scoring
 
