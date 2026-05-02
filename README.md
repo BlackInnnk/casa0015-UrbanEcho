@@ -71,7 +71,13 @@ Place Details combines location, environmental fit, sensor readings, average sta
 
 ## Landing Page
 
-The project includes a static landing page at:
+The project includes a static landing page published through GitHub Pages:
+
+```text
+https://blackinnnk.github.io/casa0015-UrbanEcho/
+```
+
+The source file is:
 
 ```text
 docs/index.html
