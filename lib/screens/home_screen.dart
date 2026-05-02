@@ -17,7 +17,7 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final savedPlaceCount = savedPlaces.length;
+    final favoritePlaceCount = savedPlaces.length;
     final weekStart = DateTime.now().subtract(const Duration(days: 7));
     final addedThisWeek = savedPlaces
         .where((place) => place.recordedAt.isAfter(weekStart))
@@ -74,8 +74,8 @@ class HomeScreen extends StatelessWidget {
                   children: [
                     Expanded(
                       child: _HomeStatCard(
-                        value: '$savedPlaceCount',
-                        label: 'Saved places',
+                        value: '$favoritePlaceCount',
+                        label: 'Favorite places',
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -134,10 +134,10 @@ class HomeScreen extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
             child: Row(
               children: [
-                const Expanded(child: _SectionLabel('Recent')),
+                const Expanded(child: _SectionLabel('Recent favorites')),
                 TextButton(
                   onPressed: onOpenFavorites,
-                  child: const Text('Saved'),
+                  child: const Text('View favorites'),
                 ),
               ],
             ),

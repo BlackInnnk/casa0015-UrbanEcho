@@ -279,7 +279,7 @@ class _RecentEmpty extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'No recent places yet. Open the map to record one.',
+                'No favorite places yet. Open All places and bookmark one.',
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: _mutedInk),
