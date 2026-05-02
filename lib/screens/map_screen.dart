@@ -1245,13 +1245,14 @@ class _MapScreenState extends State<MapScreen> {
   @override
   Widget build(BuildContext context) {
     final location = _currentLocation;
+    final sharedPlaceGroups = _sharedPlaceGroups;
     final visibleSavedPlaces = _filterPlacesByType(
       widget.savedPlaces,
       _selectedMapPlaceType,
     );
     final visibleSharedPlaces = _showSharedPlaces
         ? _filterSharedPlaceGroupsByType(
-            _sharedPlaceGroups,
+            sharedPlaceGroups,
             _selectedMapPlaceType,
           )
         : <SharedPlaceGroup>[];
@@ -1331,7 +1332,7 @@ class _MapScreenState extends State<MapScreen> {
                   selectedPlaceType: _selectedMapPlaceType,
                   visibleSavedCount: visibleSavedPlaces.length,
                   savedCount: widget.savedPlaces.length,
-                  sharedCount: _sharedPlaces.length,
+                  sharedCount: sharedPlaceGroups.length,
                   onLocate: _isLoading ? null : _loadCurrentLocation,
                   onStartDraftPlace: _startDraftPlace,
                   onSaveDraftPlace: _draftPlacePoint == null
