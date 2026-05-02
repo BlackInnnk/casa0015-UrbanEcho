@@ -94,6 +94,8 @@
       }
 
       .hero-copy {
+        position: relative;
+        z-index: 2;
         max-width: 620px;
         animation: rise 720ms ease-out both;
       }
@@ -169,6 +171,7 @@
 
       .phone-stack {
         position: relative;
+        z-index: 1;
         min-height: min(660px, 70svh);
         animation: drift-in 900ms 120ms ease-out both;
       }
@@ -197,7 +200,7 @@
       }
 
       .phone.two {
-        left: 0;
+        left: 8%;
         bottom: 1%;
         transform: rotate(-7deg);
         opacity: 0.92;
@@ -382,6 +385,13 @@
         line-height: 1.7;
       }
 
+      .closing,
+      .closing.reveal {
+        opacity: 1;
+        transform: none;
+        animation: none;
+      }
+
       .reveal {
         opacity: 0;
         transform: translateY(24px);
@@ -479,7 +489,7 @@
         }
 
         .phone.two {
-          left: 0;
+          left: 2%;
           bottom: 2%;
         }
 
