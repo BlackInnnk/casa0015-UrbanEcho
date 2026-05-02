@@ -139,11 +139,12 @@ class _SharedCommentCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Expanded(
-                  child: _StarRatingDisplay(rating: sharedPlace.place.rating),
-                ),
+                _StarRatingDisplay(rating: sharedPlace.place.rating),
                 if (isOwnReview) ...[
                   DecoratedBox(
                     decoration: BoxDecoration(
@@ -164,7 +165,6 @@ class _SharedCommentCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
                 ],
                 Text(
                   _formatTime(sharedPlace.uploadedAt),
@@ -385,6 +385,8 @@ class _SavedPlaceDetailsDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Place details'),
+      actionsOverflowDirection: VerticalDirection.down,
+      actionsOverflowButtonSpacing: 8,
       content: SingleChildScrollView(
         child: _SavedPlaceSummary(
           place: place,
@@ -487,22 +489,34 @@ class _SavedPlaceSummary extends StatelessWidget {
               style: theme.textTheme.labelSmall?.copyWith(color: _mutedInk),
             ),
             const SizedBox(height: 10),
-            Row(
+            Wrap(
+              spacing: 10,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 _StarRatingDisplay(
                   rating: averageRating ?? place.rating,
                   ratingCount: ratingCount,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    '${_noiseLevelFromDb(place.noiseDb)} ${_formatNoiseValue(place.noiseDb)} · '
-                    '${_lightLevelFromLux(place.lightLux)} ${_formatLightValue(place.lightLux)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: _mutedInk,
-                    ),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 190),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 2,
+                    children: [
+                      Text(
+                        '${_noiseLevelFromDb(place.noiseDb)} ${_formatNoiseValue(place.noiseDb)}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: _mutedInk,
+                        ),
+                      ),
+                      Text(
+                        '${_lightLevelFromLux(place.lightLux)} ${_formatLightValue(place.lightLux)}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: _mutedInk,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 _SuitabilityDots(placeType: place.placeType),

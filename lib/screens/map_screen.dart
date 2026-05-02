@@ -510,6 +510,8 @@ class _MapScreenState extends State<MapScreen> {
 
           return AlertDialog(
             title: const Text('Place details'),
+            actionsOverflowDirection: VerticalDirection.down,
+            actionsOverflowButtonSpacing: 8,
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
