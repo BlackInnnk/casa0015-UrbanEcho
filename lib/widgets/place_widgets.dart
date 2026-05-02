@@ -115,9 +115,13 @@ class _StarRatingDisplay extends StatelessWidget {
 }
 
 class _SharedCommentCard extends StatelessWidget {
-  const _SharedCommentCard({required this.sharedPlace});
+  const _SharedCommentCard({
+    required this.sharedPlace,
+    this.isOwnReview = false,
+  });
 
   final SharedPlaceLog sharedPlace;
+  final bool isOwnReview;
 
   @override
   Widget build(BuildContext context) {
@@ -140,6 +144,28 @@ class _SharedCommentCard extends StatelessWidget {
                 Expanded(
                   child: _StarRatingDisplay(rating: sharedPlace.place.rating),
                 ),
+                if (isOwnReview) ...[
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: _tealSoft,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      child: Text(
+                        'Your review',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: _teal,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 Text(
                   _formatTime(sharedPlace.uploadedAt),
                   style: theme.textTheme.labelSmall?.copyWith(color: _mutedInk),
@@ -154,6 +180,165 @@ class _SharedCommentCard extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+Future<_SharedReviewDraft?> _showSharedReviewSheet(
+  BuildContext context, {
+  required SavedPlaceLog place,
+  required SharedPlaceLog? existingReview,
+}) {
+  return showModalBottomSheet<_SharedReviewDraft>(
+    context: context,
+    isScrollControlled: true,
+    builder: (context) =>
+        _SharedReviewSheet(place: place, existingReview: existingReview),
+  );
+}
+
+class _SharedReviewSheet extends StatefulWidget {
+  const _SharedReviewSheet({required this.place, required this.existingReview});
+
+  final SavedPlaceLog place;
+  final SharedPlaceLog? existingReview;
+
+  @override
+  State<_SharedReviewSheet> createState() => _SharedReviewSheetState();
+}
+
+class _SharedReviewSheetState extends State<_SharedReviewSheet> {
+  final TextEditingController _commentController = TextEditingController();
+  double _rating = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    final existingReview = widget.existingReview;
+    if (existingReview == null) {
+      return;
+    }
+
+    _commentController.text = existingReview.place.comment;
+    _rating = existingReview.place.rating ?? 0;
+  }
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final review = _SharedReviewDraft(
+      comment: _commentController.text.trim(),
+      rating: _rating,
+    );
+    if (!review.hasContent) {
+      return;
+    }
+
+    Navigator.of(context).pop(review);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isEditing = widget.existingReview != null;
+    final canSubmit = _commentController.text.trim().isNotEmpty || _rating > 0;
+
+    return SafeArea(
+      top: false,
+      child: AnimatedPadding(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: DecoratedBox(
+          decoration: const BoxDecoration(
+            color: _cream,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+            border: Border(top: BorderSide(color: _paperLine)),
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const _SheetHandle(),
+                const SizedBox(height: 12),
+                Text(
+                  isEditing ? 'Edit your review' : 'Review this place',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.place.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(color: _mutedInk),
+                ),
+                const SizedBox(height: 14),
+                const _FieldLabel('Public comment'),
+                TextField(
+                  controller: _commentController,
+                  minLines: 2,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    hintText: 'What should other people know about this place?',
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                  ),
+                  onChanged: (_) => setState(() {}),
+                ),
+                const SizedBox(height: 12),
+                _StarRatingInput(
+                  rating: _rating,
+                  onChanged: (value) {
+                    setState(() {
+                      _rating = value;
+                    });
+                  },
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: FilledButton(
+                        onPressed: canSubmit ? _submit : null,
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          isEditing ? 'Update review' : 'Post review',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

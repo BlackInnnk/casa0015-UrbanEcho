@@ -38,6 +38,16 @@ String _sharedPlaceId(SavedPlaceLog place) {
       .replaceAll(RegExp(r'^_|_$'), '');
 }
 
+String _sharedReviewId(SavedPlaceLog place, String source) {
+  final rawId = [_sharedPlaceGroupKey(place), source].join('_review_');
+
+  return rawId
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'_+'), '_')
+      .replaceAll(RegExp(r'^_|_$'), '');
+}
+
 String _sharedPlaceIdFromJson(Map<String, Object?> json) {
   return [
     json['name'] ?? 'shared-place',

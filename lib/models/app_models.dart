@@ -111,6 +111,15 @@ class SharedPlaceLog {
   }
 }
 
+class _SharedReviewDraft {
+  const _SharedReviewDraft({required this.comment, required this.rating});
+
+  final String comment;
+  final double rating;
+
+  bool get hasContent => comment.trim().isNotEmpty || rating > 0;
+}
+
 class SharedPlaceGroup {
   const SharedPlaceGroup({required this.places});
 

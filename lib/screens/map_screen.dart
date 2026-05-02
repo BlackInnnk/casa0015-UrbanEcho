@@ -34,6 +34,7 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> {
   static const LatLng _ucl = LatLng(51.5246, -0.1340);
   static const double _nearbyPlaceThresholdMeters = 25;
+  static const String _localUserIdFileName = 'urbanecho_user_id.txt';
 
   final GlobalKey _mapAreaKey = GlobalKey();
   final MapController _mapController = MapController();
@@ -42,6 +43,7 @@ class _MapScreenState extends State<MapScreen> {
   final Distance _distance = const Distance();
   final String _mqttClientId =
       'urbanecho_${DateTime.now().millisecondsSinceEpoch}';
+  String? _localUserId;
 
   LatLng? _currentLocation;
   StreamSubscription<int>? _lightSubscription;
@@ -77,6 +79,7 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
+    _loadLocalUserId();
     _loadCurrentLocation();
     _loadMqttSettings();
   }
@@ -168,6 +171,53 @@ class _MapScreenState extends State<MapScreen> {
       _startMqttRefreshTimer();
     }
     await _connectSharedMap();
+  }
+
+  Future<void> _loadLocalUserId() async {
+    await _ensureLocalUserId();
+  }
+
+  Future<String> _ensureLocalUserId() async {
+    final existingUserId = _localUserId;
+    if (existingUserId != null && existingUserId.trim().isNotEmpty) {
+      return existingUserId;
+    }
+
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/$_localUserIdFileName');
+      if (await file.exists()) {
+        final savedUserId = (await file.readAsString()).trim();
+        if (savedUserId.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _localUserId = savedUserId;
+            });
+          } else {
+            _localUserId = savedUserId;
+          }
+          return savedUserId;
+        }
+      }
+
+      final generatedUserId =
+          'urbanecho_user_${DateTime.now().millisecondsSinceEpoch}';
+      await file.writeAsString(generatedUserId);
+      if (mounted) {
+        setState(() {
+          _localUserId = generatedUserId;
+        });
+      } else {
+        _localUserId = generatedUserId;
+      }
+      return generatedUserId;
+    } catch (_) {
+      final fallbackUserId =
+          _localUserId ??
+          'urbanecho_user_${DateTime.now().millisecondsSinceEpoch}';
+      _localUserId = fallbackUserId;
+      return fallbackUserId;
+    }
   }
 
   Future<void> _loadCurrentLocation() async {
@@ -446,11 +496,17 @@ class _MapScreenState extends State<MapScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
+          final activeGroup = _currentSharedPlaceGroup(group) ?? group;
           final savedPlace = _matchingSavedPlace(
             widget.savedPlaces,
-            group.place,
+            activeGroup.place,
           );
           final isSaved = savedPlace != null;
+          final localReview = _localReviewForGroup(activeGroup);
+          final reviewItems = activeGroup.places.where((sharedPlace) {
+            return sharedPlace.place.comment.trim().isNotEmpty ||
+                sharedPlace.place.rating != null;
+          }).toList()..sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
 
           return AlertDialog(
             title: const Text('Place details'),
@@ -460,34 +516,54 @@ class _MapScreenState extends State<MapScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _SavedPlaceSummary(
-                    place: group.place,
+                    place: activeGroup.place,
                     currentLocation: _currentLocation,
-                    averageRating: group.averageRating,
-                    ratingCount: group.ratingCount,
+                    averageRating: activeGroup.averageRating,
+                    ratingCount: activeGroup.ratingCount,
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    '${group.ratingCount} rating(s) • ${group.commentCount} public comment(s)',
+                    '${activeGroup.ratingCount} rating(s) • ${activeGroup.commentCount} public comment(s)',
                     style: Theme.of(
                       context,
                     ).textTheme.bodySmall?.copyWith(color: _mutedInk),
                   ),
                   const SizedBox(height: 10),
-                  ...group.places
-                      .where((sharedPlace) {
-                        return sharedPlace.place.comment.trim().isNotEmpty ||
-                            sharedPlace.place.rating != null;
-                      })
-                      .map(
-                        (sharedPlace) => Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _SharedCommentCard(sharedPlace: sharedPlace),
+                  if (reviewItems.isEmpty)
+                    Text(
+                      'No public comments yet.',
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: _mutedInk),
+                    )
+                  else
+                    ...reviewItems.map(
+                      (sharedPlace) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _SharedCommentCard(
+                          sharedPlace: sharedPlace,
+                          isOwnReview: sharedPlace.source == _localUserId,
                         ),
                       ),
+                    ),
                 ],
               ),
             ),
             actions: [
+              TextButton.icon(
+                onPressed: () async {
+                  final uploaded = await _reviewSharedPlace(activeGroup);
+                  if (uploaded && context.mounted) {
+                    setDialogState(() {});
+                  }
+                },
+                icon: Icon(
+                  localReview == null
+                      ? Icons.rate_review_outlined
+                      : Icons.edit_outlined,
+                ),
+                label: Text(localReview == null ? 'Add review' : 'Edit review'),
+              ),
               FilledButton.icon(
                 style: FilledButton.styleFrom(
                   backgroundColor: isSaved ? _deepBrown : _terracotta,
@@ -499,7 +575,7 @@ class _MapScreenState extends State<MapScreen> {
                     setDialogState(() {});
                     return;
                   }
-                  _saveSharedPlaceLocally(group.localCopy);
+                  _saveSharedPlaceLocally(activeGroup.localCopy);
                   setDialogState(() {});
                 },
                 icon: Icon(
@@ -516,6 +592,71 @@ class _MapScreenState extends State<MapScreen> {
         },
       ),
     );
+  }
+
+  SharedPlaceGroup? _currentSharedPlaceGroup(SharedPlaceGroup group) {
+    final targetKey = _sharedPlaceGroupKey(group.place);
+    for (final sharedGroup in _sharedPlaceGroups) {
+      if (_sharedPlaceGroupKey(sharedGroup.place) == targetKey) {
+        return sharedGroup;
+      }
+    }
+    return null;
+  }
+
+  SharedPlaceLog? _localReviewForGroup(SharedPlaceGroup group) {
+    final userId = _localUserId;
+    if (userId == null) {
+      return null;
+    }
+
+    final reviews = group.places.where((place) => place.source == userId);
+    if (reviews.isEmpty) {
+      return null;
+    }
+
+    return reviews.reduce((latest, next) {
+      return next.uploadedAt.isAfter(latest.uploadedAt) ? next : latest;
+    });
+  }
+
+  Future<bool> _reviewSharedPlace(SharedPlaceGroup group) async {
+    final userId = await _ensureLocalUserId();
+    final currentGroup = _currentSharedPlaceGroup(group) ?? group;
+    final existingReview = _localReviewForGroup(currentGroup);
+    if (!mounted) {
+      return false;
+    }
+
+    final review = await _showSharedReviewSheet(
+      context,
+      place: currentGroup.place,
+      existingReview: existingReview,
+    );
+    if (review == null) {
+      return false;
+    }
+
+    final uploaded = await _publishSharedReview(
+      currentGroup,
+      review,
+      userId,
+      existingReview,
+    );
+    if (!mounted) {
+      return uploaded;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          uploaded
+              ? 'Review uploaded.'
+              : 'Review upload failed. Check network connection.',
+        ),
+      ),
+    );
+    return uploaded;
   }
 
   List<SharedPlaceGroup> get _sharedPlaceGroups {
@@ -767,12 +908,43 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<bool> _publishSharedPlace(SavedPlaceLog place) async {
+    final userId = await _ensureLocalUserId();
     final sharedPlace = SharedPlaceLog(
       id: _sharedPlaceId(place),
-      source: 'anonymous-urbanecho',
+      source: userId,
       uploadedAt: DateTime.now(),
       place: place,
     );
+    return _publishSharedLog(
+      sharedPlace,
+      successMessage: '${place.name} uploaded.',
+    );
+  }
+
+  Future<bool> _publishSharedReview(
+    SharedPlaceGroup group,
+    _SharedReviewDraft review,
+    String userId,
+    SharedPlaceLog? existingReview,
+  ) async {
+    final place = group.place.copyWith(
+      comment: review.comment,
+      rating: review.rating == 0 ? null : review.rating,
+      clearRating: review.rating == 0,
+    );
+    final sharedPlace = SharedPlaceLog(
+      id: existingReview?.id ?? _sharedReviewId(group.place, userId),
+      source: userId,
+      uploadedAt: DateTime.now(),
+      place: place,
+    );
+    return _publishSharedLog(sharedPlace, successMessage: 'Review uploaded.');
+  }
+
+  Future<bool> _publishSharedLog(
+    SharedPlaceLog sharedPlace, {
+    required String successMessage,
+  }) async {
     final builder = MqttClientPayloadBuilder()
       ..addString(jsonEncode(sharedPlace.toJson()));
 
@@ -796,7 +968,7 @@ class _MapScreenState extends State<MapScreen> {
           return true;
         }
         setState(() {
-          _statusMessage = '${place.name} uploaded.';
+          _statusMessage = successMessage;
         });
 
         return true;
