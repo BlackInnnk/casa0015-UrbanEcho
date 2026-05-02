@@ -161,8 +161,61 @@ class SharedPlaceGroup {
 
   DateTime get uploadedAt => latestPlace.uploadedAt;
 
+  SharedPlaceLog get primaryPlace {
+    for (final place in places) {
+      if (!isReviewLog(place)) {
+        return place;
+      }
+    }
+
+    return latestPlace;
+  }
+
+  bool isReviewLog(SharedPlaceLog place) {
+    final placeGroupId = place.groupId;
+    if (placeGroupId != null && placeGroupId.trim().isNotEmpty) {
+      return placeGroupId == groupId && place.id != groupId;
+    }
+
+    return place.id.contains('_review_');
+  }
+
+  List<SharedPlaceLog> get publicFeedback {
+    final feedbackBySource = <String, SharedPlaceLog>{};
+    for (final place in places) {
+      final hasFeedback =
+          place.place.comment.trim().isNotEmpty || place.place.rating != null;
+      if (!hasFeedback) {
+        continue;
+      }
+
+      final sourceKey = place.source.trim().isEmpty ? place.id : place.source;
+      final existing = feedbackBySource[sourceKey];
+      if (existing == null || _shouldReplaceFeedback(existing, place)) {
+        feedbackBySource[sourceKey] = place;
+      }
+    }
+
+    return feedbackBySource.values.toList()
+      ..sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
+  }
+
+  bool _shouldReplaceFeedback(SharedPlaceLog current, SharedPlaceLog next) {
+    final currentIsReview = isReviewLog(current);
+    final nextIsReview = isReviewLog(next);
+
+    if (nextIsReview && !currentIsReview) {
+      return true;
+    }
+    if (nextIsReview == currentIsReview) {
+      return next.uploadedAt.isAfter(current.uploadedAt);
+    }
+
+    return false;
+  }
+
   double? get averageRating {
-    final ratings = places
+    final ratings = publicFeedback
         .map((sharedPlace) => sharedPlace.place.rating)
         .whereType<double>()
         .toList();
@@ -174,21 +227,21 @@ class SharedPlaceGroup {
   }
 
   int get ratingCount {
-    return places
+    return publicFeedback
         .where((sharedPlace) => sharedPlace.place.rating != null)
         .length;
   }
 
   int get commentCount {
-    return places.where((sharedPlace) {
+    return publicFeedback.where((sharedPlace) {
       return sharedPlace.place.comment.trim().isNotEmpty;
     }).length;
   }
 
   SavedPlaceLog _mergeSharedPlaceValues() {
-    final latest = latestPlace.place;
-    double? noiseDb = latest.noiseDb;
-    int? lightLux = latest.lightLux;
+    final primary = primaryPlace.place;
+    double? noiseDb = primary.noiseDb;
+    int? lightLux = primary.lightLux;
 
     for (final sharedPlace in places) {
       noiseDb ??= sharedPlace.place.noiseDb;
@@ -199,12 +252,12 @@ class SharedPlaceGroup {
     }
 
     return SavedPlaceLog(
-      point: latest.point,
-      recordedAt: latest.recordedAt,
-      name: latest.name,
-      placeType: latest.placeType,
-      comment: latest.comment,
-      rating: latest.rating ?? averageRating,
+      point: primary.point,
+      recordedAt: primary.recordedAt,
+      name: primary.name,
+      placeType: primary.placeType,
+      comment: primary.comment,
+      rating: averageRating ?? primary.rating,
       noiseDb: noiseDb,
       lightLux: lightLux,
     );

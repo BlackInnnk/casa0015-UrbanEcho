@@ -557,10 +557,7 @@ class _MapScreenState extends State<MapScreen> {
           );
           final isSaved = savedPlace != null;
           final localReview = _localReviewForGroup(activeGroup);
-          final reviewItems = activeGroup.places.where((sharedPlace) {
-            return sharedPlace.place.comment.trim().isNotEmpty ||
-                sharedPlace.place.rating != null;
-          }).toList()..sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
+          final reviewItems = activeGroup.publicFeedback;
 
           return AlertDialog(
             title: const Text('Place details'),
@@ -598,7 +595,9 @@ class _MapScreenState extends State<MapScreen> {
                         padding: const EdgeInsets.only(bottom: 10),
                         child: _SharedCommentCard(
                           sharedPlace: sharedPlace,
-                          isOwnReview: sharedPlace.source == _localUserId,
+                          isOwnReview:
+                              activeGroup.isReviewLog(sharedPlace) &&
+                              sharedPlace.source == _localUserId,
                         ),
                       ),
                     ),
@@ -666,7 +665,9 @@ class _MapScreenState extends State<MapScreen> {
       return null;
     }
 
-    final reviews = group.places.where((place) => place.source == userId);
+    final reviews = group.places.where((place) {
+      return group.isReviewLog(place) && place.source == userId;
+    });
     if (reviews.isEmpty) {
       return null;
     }
