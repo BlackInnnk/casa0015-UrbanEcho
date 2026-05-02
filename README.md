@@ -28,29 +28,46 @@ The app is not intended to be a scientific pollution monitor. Its goal is to mak
 - Temporary moderation delete action for shared places during prototype testing.
 - OpenStreetMap map tiles through `flutter_map`.
 
-## Screenshots
+## App Walkthrough
 
-Screenshots are stored under `media/`.
+### Opening and Home
 
-| Opening Screen | Home |
-| --- | --- |
-| <img src="media/09_loading_page.jpg" alt="Opening screen" width="260"> | <img src="media/01_home.jpg" alt="Home screen" width="260"> |
+UrbanEcho starts with a short opening page that explains the app purpose before moving into the main interface. The Home page gives quick access to All Places, activity-based browsing, the map, and recent favorites.
 
-| Map | Map Controls |
-| --- | --- |
-| <img src="media/02_map.jpg" alt="Map screen" width="260"> | <img src="media/03_map_sensor.jpg" alt="Map controls and sensors" width="260"> |
+<img src="media/09_loading_page.jpg" alt="Opening screen" width="260">
+<img src="media/01_home.jpg" alt="Home screen" width="260">
 
-| Create Place | All Places |
-| --- | --- |
-| <img src="media/04_create_place.jpg" alt="Create place sheet" width="260"> | <img src="media/05_all_places.jpg" alt="All places screen" width="260"> |
+### Map and Sensor Capture
 
-| Sorting | Favorites |
-| --- | --- |
-| <img src="media/06_place_sort.jpg" alt="Place sorting options" width="260"> | <img src="media/07_fav_places.jpg" alt="Favorite places screen" width="260"> |
+The Map page shows the user's current location, shared places, and favorited places. The bottom panel contains the main actions: locating the user, starting sensor capture, creating a place, and opening the Places view.
 
-| Place Details |
-| --- |
-| <img src="media/08_place_details.jpg" alt="Place details with environmental fit and public reviews" width="260"> |
+<img src="media/02_map.jpg" alt="Map screen" width="260">
+<img src="media/03_map_sensor.jpg" alt="Map controls and sensors" width="260">
+
+### Creating a Place
+
+To create a place, the user first starts Sensors so the app has noise and light data. The place is positioned by moving the map under the fixed centre marker, then the create sheet records the name, activity type, rating, note, coordinates, and sensor context.
+
+<img src="media/04_create_place.jpg" alt="Create place sheet" width="260">
+
+### All Places and Sorting
+
+All Places shows shared MQTT places from all users. The list can be filtered by activity type and sorted by recency, rating, study fit, rest fit, social fit, noise, or light.
+
+<img src="media/05_all_places.jpg" alt="All places screen" width="260">
+<img src="media/06_place_sort.jpg" alt="Place sorting options" width="260">
+
+### Favorites
+
+Favorites are local bookmarks for places the user wants to keep. They make it easier to return to useful shared places without changing the public All Places list.
+
+<img src="media/07_fav_places.jpg" alt="Favorite places screen" width="260">
+
+### Place Details and Public Feedback
+
+Place Details combines location, environmental fit, sensor readings, average star rating, and public comments. Each user can add one rating/comment for a shared place and later edit their own review; the displayed score is calculated from shared feedback.
+
+<img src="media/08_place_details.jpg" alt="Place details with environmental fit and public reviews" width="260">
 
 ## How It Works
 
