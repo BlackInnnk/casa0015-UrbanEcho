@@ -2,6 +2,20 @@
 
 UrbanEcho is an Android-first Flutter app for recording and exploring city places through environmental sensing, map-based place memory, and shared public feedback. It combines phone sensors, location, OpenStreetMap, and MQTT so users can compare how different places feel for studying, resting, or socialising.
 
+## Download APK
+
+The Android release APK is available from the GitHub Release page:
+
+```text
+https://github.com/BlackInnnk/casa0015-UrbanEcho/releases/tag/v1.0.0
+```
+
+Direct APK asset:
+
+```text
+https://github.com/BlackInnnk/casa0015-UrbanEcho/releases/download/v1.0.0/app-release.apk
+```
+
 ## Project Idea
 
 Students and city users often choose places based on vague memory: whether a space felt quiet, bright, busy, or comfortable. UrbanEcho turns those impressions into small place records by combining:
@@ -210,7 +224,15 @@ flutter build apk --release
 
 ## Android Release on GitHub
 
-This repository includes a GitHub Actions workflow for producing the Android release APK:
+The current submitted Android build is published as:
+
+```text
+https://github.com/BlackInnnk/casa0015-UrbanEcho/releases/tag/v1.0.0
+```
+
+It includes `app-release.apk` as a downloadable release asset.
+
+This repository also includes a GitHub Actions workflow for producing the Android release APK:
 
 ```text
 .github/workflows/android-release.yml
@@ -232,14 +254,14 @@ release/app-release.apk
 
 The `release/` folder is ignored by Git because APKs are generated build outputs.
 
-Create a GitHub Release:
+To create a future tagged GitHub Release:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
-Pushing a `v*` tag builds `app-release.apk` and attaches it to a GitHub Release.
+Pushing a `v*` tag builds `app-release.apk`. The APK can then be attached to the GitHub Release for that tag.
 
 If the release APK should connect to MQTT, configure these GitHub repository secrets before running the workflow:
 
