@@ -224,6 +224,14 @@ Manual build:
 4. Click `Run workflow`.
 5. Download the `urbanecho-release-apk` artifact after the workflow finishes.
 
+The downloaded APK can be kept locally at:
+
+```text
+release/app-release.apk
+```
+
+The `release/` folder is ignored by Git because APKs are generated build outputs.
+
 Create a GitHub Release:
 
 ```bash

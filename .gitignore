@@ -54,5 +54,8 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Local release APKs downloaded from GitHub Actions.
+/release/
+
 # Local MQTT credentials. Commit only the example config.
 /assets/config/mqtt_config.json
