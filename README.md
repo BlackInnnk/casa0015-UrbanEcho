@@ -208,6 +208,43 @@ Build an Android release APK:
 flutter build apk --release
 ```
 
+## Android Release on GitHub
+
+This repository includes a GitHub Actions workflow for producing the Android release APK:
+
+```text
+.github/workflows/android-release.yml
+```
+
+Manual build:
+
+1. Push the latest code to GitHub.
+2. Open the repository on GitHub.
+3. Go to `Actions` -> `Android Release`.
+4. Click `Run workflow`.
+5. Download the `urbanecho-release-apk` artifact after the workflow finishes.
+
+Create a GitHub Release:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Pushing a `v*` tag builds `app-release.apk` and attaches it to a GitHub Release.
+
+If the release APK should connect to MQTT, configure these GitHub repository secrets before running the workflow:
+
+```text
+MQTT_HOST
+MQTT_PORT
+MQTT_USER
+MQTT_PASS
+MQTT_TOPIC_PREFIX
+```
+
+Do not commit real MQTT credentials to the repository. Only use credentials that are acceptable to embed in a distributed APK.
+
 ## Repository Structure
 
 ```text
